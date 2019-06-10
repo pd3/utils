@@ -31,6 +31,6 @@ all: $(LIBS)
 	$(CC) $(CFLAGS) -c $<
 
 clean:
-	rm -f *.o *.a *~
+	rm -f *.o *.a *~ version.h
 
 
