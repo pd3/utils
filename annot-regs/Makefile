@@ -21,7 +21,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 CC      = gcc
-CFLAGS  = -Wall -g -O2 -I ../htslib
+CFLAGS  = -Wall -g -O2 -I ../libs -I ../htslib
 LDLIBS  =  ../libs/regidx.o ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lcrypto -lcrypt -lpthread
 BIN     = annot-regs
 SOURCES = annot-regs.c
@@ -29,7 +29,7 @@ OBJECTS = $(SOURCES:.c=.o)
 
 all: $(BIN)
 
-annot-regs.o: ../version.h annot-regs.c
+annot-regs.o: ../libs/version.h annot-regs.c
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<

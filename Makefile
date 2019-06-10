@@ -28,7 +28,7 @@ export HTSDIR = ../htslib
 TARGETS = annot-regs
 
 all:
-	@$(MAKE) version.h; \
+	@$(MAKE) libs/version.h; \
     ln -fs $(HTSDIR) htslib; \
     $(MAKE) -C libs; \
 	for T in $(TARGETS) ; do $(MAKE) -C $$T; done
@@ -42,9 +42,9 @@ test:
 
 
 PACKAGE_VERSION := 1.0.$(shell git describe --always --dirty)
-version.h: $(if $(wildcard version.h),$(if $(findstring "$(PACKAGE_VERSION)",$(shell cat version.h)),,force))
+libs/version.h: $(if $(wildcard version.h),$(if $(findstring "$(PACKAGE_VERSION)",$(shell cat version.h)),,force))
 
-version.h:
+libs/version.h:
 	echo '#define ANNOT_REGS_VERSION "$(PACKAGE_VERSION)"' > $@
 
 

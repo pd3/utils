@@ -7,4 +7,4 @@ This program is a solution to a common problem
  - match records by a common column (e.g. sample name)
  - transfer a field from one file to another
  
-See the [slides](https://raw.githubusercontent.com/pd3/utils/master/annot-regs/doc.pdf) for documentation and usage examples.
+See the [slides](https://raw.githubusercontent.com/pd3/utils/master/annot-regs/doc.annot-regs.pdf) for documentation and usage examples.
