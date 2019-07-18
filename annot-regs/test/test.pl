@@ -42,6 +42,8 @@ test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.1.txt',args=
 test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.2.txt',args=>'-c 1,2,3:1,2,3 -t 4:5');
 test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.3.txt',args=>'-c 1,2,3:1,2,3 -t 4,value:5,value');
 test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.4.txt',args=>'-c 1,2,3:1,2,3 -t value,4:value,5');
+test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.5.txt',args=>'-c 1,2,3:1,2,3 -t value,4:value,5 -a nbp,frac');
+test_annot_regs($opts,src=>'src.3.txt',dst=>'dst.3.txt',out=>'out.3.1.txt',args=>'-t smpl:overlap -a nbp,frac');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};

@@ -34,6 +34,9 @@
 #include "regidx.h"
 #include "version.h"
 
+#define ANN_NBP     1
+#define ANN_FRAC    2
+
 typedef struct
 {
     int n,m;
@@ -44,7 +47,7 @@ cols_t;
 typedef struct
 {
     void *name2idx;
-    cols_t *cols;
+    cols_t *cols, *annots;
     int dummy;
 }
 hdr_t;
@@ -53,16 +56,33 @@ typedef struct
 {
     char *fname;
     hdr_t *hdr;
-    cols_t *core, *match, *transfer;
-    int *core_idx, *match_idx, *transfer_idx;
+    cols_t *core, *match, *transfer, *annots;
+    int *core_idx, *match_idx, *transfer_idx, *annots_idx;
     int grow_n;
 }
 dat_t;
 
+// This is for the special -a annotations, keeps a list of 
+// soure regions that hit the destination region. The start
+// coordinates are converted to beg<<1 and end coordinates
+// to (end<<1)+1.
+#define NBP_SET_BEG(x) ((x)<<1)
+#define NBP_SET_END(x) (((x)<<1)+1)
+#define NBP_GET(x)     ((x)>>1)
+#define NBP_IS_BEG(x)  (((x)&1)==0)
+#define NBP_IS_END(x)  (((x)&1)==1)
 typedef struct
 {
+    int n,m;
+    uint32_t *regs; // change to uint64_t for very large genomes
+}
+nbp_t;
+
+typedef struct
+{
+    nbp_t *nbp;
     dat_t dst, src;
-    char *core_str, *match_str, *transfer_str;
+    char *core_str, *match_str, *transfer_str, *annots_str;
     char *temp_dir;
     int allow_dups, reciprocal;
     float overlap;
@@ -82,6 +102,58 @@ void error(const char *format, ...)
     vfprintf(stderr, format, ap);
     va_end(ap);
     exit(-1);
+}
+
+static nbp_t *nbp_init(void)
+{
+    return calloc(1,sizeof(nbp_t));
+}
+static void nbp_destroy(nbp_t *nbp)
+{
+    free(nbp->regs);
+    free(nbp);
+}
+static inline void nbp_reset(nbp_t *nbp)
+{
+    nbp->n = 0;
+}
+static inline void nbp_add(nbp_t *nbp, uint32_t beg, uint32_t end)
+{
+    if ( end >= REGIDX_MAX>>1 ) error("Error: the coordinate is too big (%u). Possible todo: switch to uint64_t\n",end);
+    nbp->n += 2;
+    if ( nbp->n >= nbp->m )
+    {
+        nbp->m += 2;
+        nbp->regs = realloc(nbp->regs, nbp->m*sizeof(*nbp->regs));
+    }
+    nbp->regs[nbp->n - 2] = NBP_SET_BEG(beg);
+    nbp->regs[nbp->n - 1] = NBP_SET_END(end);
+}
+static int compare_uint32(const void *aptr, const void *bptr)
+{
+    uint32_t a = *(const uint32_t*) aptr;
+    uint32_t b = *(const uint32_t*) bptr;
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+static int nbp_length(nbp_t *nbp)
+{
+    qsort(nbp->regs, nbp->n, sizeof(*nbp->regs), compare_uint32);
+    int i, nopen = 0, length = 0;
+    uint32_t beg = 0;
+    for (i=0; i<nbp->n; i++)
+    {
+        if ( NBP_IS_BEG(nbp->regs[i]) )
+        {
+            if ( !nopen ) beg = NBP_GET(nbp->regs[i]);
+            nopen++;
+        }
+        else nopen--;
+        assert( nopen>=0 );
+        if ( nopen==0 && beg>0 ) length += NBP_GET(nbp->regs[i]) - beg + 1;
+    }
+    return length;
 }
 
 cols_t *cols_split(const char *line, cols_t *cols, char delim)
@@ -265,6 +337,14 @@ void write_header(hdr_t *hdr)
         ksprintf(&str,"[%d]", i+1);
         kputs(hdr->cols->off[i], &str);
     }
+    if ( hdr->annots )
+    {
+        for (i=0; i<hdr->annots->n; i++)
+        {
+            if ( str.l > 1 ) kputc('\t', &str);
+            kputs(hdr->annots->off[i], &str);
+        }
+    }
     kputc('\n',&str);
     if ( fwrite(str.s, str.l, 1, stdout) != 1 ) error("Failed to write %d bytes\n", str.l);
     free(str.s);
@@ -295,6 +375,7 @@ void init_data(args_t *args)
     args->dst.hdr = parse_header(args->dst.fname);
     args->src.hdr = parse_header(args->src.fname);
 
+    // -c, core columns
     if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end"; 
     cols_t *tmp = cols_split(args->core_str, NULL, ':');
     args->src.core = cols_split(tmp->off[0],NULL,',');
@@ -303,6 +384,7 @@ void init_data(args_t *args)
     sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.core, &args->dst.core_idx, 0);
     if ( args->src.core->n!=3 || args->dst.core->n!=3 ) error("Expected three columns: %s\n", args->core_str);
 
+    // -m, match columns
     if ( args->match_str )
     {
         tmp = cols_split(args->match_str, tmp, ':');
@@ -313,6 +395,7 @@ void init_data(args_t *args)
         if ( args->src.match->n != args->dst.match->n ) error("Expected equal number of columns: %s\n", args->match_str);
     }
 
+    // -t, transfer columns
     if ( !args->transfer_str ) error("Missing the -t, --transfer option\n");
     tmp = cols_split(args->transfer_str, tmp, ':');
     args->src.transfer = cols_split(tmp->off[0],NULL,',');
@@ -345,6 +428,23 @@ void init_data(args_t *args)
         args->tmp_hash[i] = khash_str2int_init();
     cols_destroy(tmp);
 
+    // -a, annotation columns
+    if ( args->annots_str )
+    {
+        tmp = cols_split(args->annots_str, NULL, ':');
+        args->src.annots = cols_split(tmp->off[0],NULL,',');
+        args->dst.annots = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
+        if ( args->src.annots->n!=args->dst.annots->n ) error("Different number of src and dst columns in %s\n",args->annots_str);
+        args->dst.annots_idx = (int*) malloc(sizeof(int)*args->dst.annots->n);
+        for (i=0; i<args->src.annots->n; i++)
+        {
+            if ( !strcasecmp(args->src.annots->off[i],"nbp") ) args->dst.annots_idx[i] = ANN_NBP;
+            else if ( !strcasecmp(args->src.annots->off[i],"frac") ) args->dst.annots_idx[i] = ANN_FRAC;
+            else error("The annotation \"%s\" is not recognised\n", args->src.annots->off[i]);
+        }
+        args->nbp = nbp_init();
+    }
+
     args->idx = regidx_init(args->src.fname, parse_tab_with_payload,free_payload,sizeof(cols_t),&args->src);
     args->itr = regitr_init(args->idx);
 
@@ -366,6 +466,9 @@ void destroy_data(args_t *args)
     cols_destroy(args->dst.match);
     cols_destroy(args->src.transfer);
     cols_destroy(args->dst.transfer);
+    if ( args->src.annots ) cols_destroy(args->src.annots);
+    if ( args->dst.annots ) cols_destroy(args->dst.annots);
+    if ( args->nbp ) nbp_destroy(args->nbp);
     destroy_header(args->src.hdr);
     destroy_header(args->dst.hdr);
     free(args->src.core_idx);
@@ -374,12 +477,14 @@ void destroy_data(args_t *args)
     free(args->dst.match_idx);
     free(args->src.transfer_idx);
     free(args->dst.transfer_idx);
+    free(args->src.annots_idx);
+    free(args->dst.annots_idx);
     if (args->itr) regitr_destroy(args->itr);
     if (args->idx) regidx_destroy(args->idx);
     free(args->tmp_kstr.s);
 }
 
-inline void write_string(args_t *args, char *str, size_t len)
+static inline void write_string(args_t *args, char *str, size_t len)
 {
     if ( len==0 ) len = strlen(str);
     if ( fwrite(str, len, 1, stdout) != 1 ) error("Failed to write %d bytes\n", len);
@@ -412,6 +517,8 @@ void process_line(args_t *args, char *line, size_t size)
         kh_clear(str2int, args->tmp_hash[i]);
     }
 
+    if ( args->nbp ) nbp_reset(args->nbp);
+
     int has_overlap = 0;
     while ( regitr_overlap(args->itr) )
     {
@@ -441,6 +548,10 @@ void process_line(args_t *args, char *line, size_t size)
             }
             if ( i != args->dst.match->n ) continue;
         }
+
+        if ( args->nbp )
+            nbp_add(args->nbp, args->itr->beg >= beg ? args->itr->beg : beg, args->itr->end <= end ? args->itr->end : end);
+
         for (i=0; i<args->src.transfer->n; i++)
         {
             char *str;
@@ -492,6 +603,27 @@ void process_line(args_t *args, char *line, size_t size)
         write_string(args, "\t", 1);
         write_string(args, dst_cols->off[i], 0);
     }
+
+    if ( args->src.annots )
+    {
+        args->tmp_kstr.l = 0;
+        int len = nbp_length(args->nbp);
+        for (i=0; i<args->dst.annots->n; i++)
+        {
+            if ( args->dst.annots_idx[i]==ANN_NBP ) 
+            {
+                kputc('\t',&args->tmp_kstr);
+                kputw(len,&args->tmp_kstr);
+            }
+            else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
+            {
+                kputc('\t',&args->tmp_kstr);
+                kputd((double)len/(end-beg+1),&args->tmp_kstr);
+            }
+        }
+        write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
+    }
+
     write_string(args, "\n", 1);
     cols_destroy(dst_cols);
 }
@@ -507,6 +639,9 @@ static const char *usage_text(void)
         "Usage: annot-regs [OPTIONS] DST\n"
         "Options:\n"
         "       --allow-dups                Add annotations multiple times\n"
+        "   -a, --annotate list             Add special annotations:\n"
+        "                                       frac .. fraction of the destination region with an overlap\n"
+        "                                       nbp  .. number of source base pairs in the overlap\n"
         "   -c, --core src:dst              Core columns [chr,beg,end:chr,beg,end]\n"
         "   -d, --dst-file file             Destination file\n"
         "   -m, --match src:dst             Require match in these columns\n"
@@ -536,6 +671,7 @@ int main(int argc, char **argv)
     {
         {"allow-dups",no_argument,NULL,0},
         {"version",no_argument,NULL,1},
+        {"annotate",required_argument,NULL,'a'},
         {"core",required_argument,NULL,'c'},
         {"dst-file",required_argument,NULL,'d'},
         {"match",required_argument,NULL,'m'},
@@ -547,7 +683,7 @@ int main(int argc, char **argv)
     };
     char *tmp = NULL;
     int c;
-    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:r",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:",loptions,NULL)) >= 0)
     {
         switch (c) 
         {
@@ -557,6 +693,7 @@ int main(int argc, char **argv)
             case 'c': args->core_str  = optarg; break;
             case 'd': args->dst.fname = optarg; break;
             case 'm': args->match_str = optarg; break;
+            case 'a': args->annots_str = optarg; break;
             case 'o': 
                 args->overlap = strtod(optarg, &tmp); 
                 if ( tmp==optarg || *tmp ) error("Could not parse --overlap %s\n", optarg);

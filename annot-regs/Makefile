@@ -22,7 +22,7 @@
 
 CC      = gcc
 CFLAGS  = -Wall -g -O2 -I ../libs -I ../htslib
-LDLIBS  = ../libs/regidx.o ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lcrypto -lcrypt -lpthread
+LDLIBS  = ../libs/regidx.o ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lpthread
 BIN     = annot-regs
 SOURCES = annot-regs.c
 OBJECTS = $(SOURCES:.c=.o)
