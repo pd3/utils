@@ -74,7 +74,8 @@ dat_t;
 typedef struct
 {
     int n,m;
-    uint32_t *regs; // change to uint64_t for very large genomes
+    uint32_t *regs;     // change to uint64_t for very large genomes
+    uint32_t beg,end;   // the current destination interval
 }
 nbp_t;
 
@@ -113,9 +114,11 @@ static void nbp_destroy(nbp_t *nbp)
     free(nbp->regs);
     free(nbp);
 }
-static inline void nbp_reset(nbp_t *nbp)
+static inline void nbp_reset(nbp_t *nbp, uint32_t beg, uint32_t end)
 {
-    nbp->n = 0;
+    nbp->n   = 0;
+    nbp->beg = beg;
+    nbp->end = end;
 }
 static inline void nbp_add(nbp_t *nbp, uint32_t beg, uint32_t end)
 {
@@ -443,6 +446,7 @@ void init_data(args_t *args)
             else error("The annotation \"%s\" is not recognised\n", args->src.annots->off[i]);
         }
         args->nbp = nbp_init();
+        cols_destroy(tmp);
     }
 
     args->idx = regidx_init(args->src.fname, parse_tab_with_payload,free_payload,sizeof(cols_t),&args->src);
@@ -489,6 +493,27 @@ static inline void write_string(args_t *args, char *str, size_t len)
     if ( len==0 ) len = strlen(str);
     if ( fwrite(str, len, 1, stdout) != 1 ) error("Failed to write %d bytes\n", len);
 }
+static void write_annots(args_t *args)
+{
+    if ( !args->dst.annots ) return;
+
+    args->tmp_kstr.l = 0;
+    int i, len = nbp_length(args->nbp);
+    for (i=0; i<args->dst.annots->n; i++)
+    {
+        if ( args->dst.annots_idx[i]==ANN_NBP ) 
+        {
+            kputc('\t',&args->tmp_kstr);
+            kputw(len,&args->tmp_kstr);
+        }
+        else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
+        {
+            kputc('\t',&args->tmp_kstr);
+            kputd((double)len/(args->nbp->end - args->nbp->beg + 1),&args->tmp_kstr);
+        }
+    }
+    write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
+}
 
 void process_line(args_t *args, char *line, size_t size)
 {
@@ -503,9 +528,12 @@ void process_line(args_t *args, char *line, size_t size)
         return;
     }
 
+    if ( args->nbp ) nbp_reset(args->nbp,beg,end);
+
     if ( !regidx_overlap(args->idx, chr_beg,beg,end, args->itr) )
     {
         write_string(args, line, size);
+        write_annots(args);
         write_string(args, "\n", 1);
         cols_destroy(dst_cols);
         return;
@@ -516,8 +544,6 @@ void process_line(args_t *args, char *line, size_t size)
         args->tmp_cols[i].n = 0;
         kh_clear(str2int, args->tmp_hash[i]);
     }
-
-    if ( args->nbp ) nbp_reset(args->nbp);
 
     int has_overlap = 0;
     while ( regitr_overlap(args->itr) )
@@ -573,6 +599,7 @@ void process_line(args_t *args, char *line, size_t size)
     if ( !has_overlap )
     {
         write_string(args, line, size);
+        write_annots(args);
         write_string(args, "\n", 1);
         cols_destroy(dst_cols);
         return;
@@ -603,27 +630,7 @@ void process_line(args_t *args, char *line, size_t size)
         write_string(args, "\t", 1);
         write_string(args, dst_cols->off[i], 0);
     }
-
-    if ( args->src.annots )
-    {
-        args->tmp_kstr.l = 0;
-        int len = nbp_length(args->nbp);
-        for (i=0; i<args->dst.annots->n; i++)
-        {
-            if ( args->dst.annots_idx[i]==ANN_NBP ) 
-            {
-                kputc('\t',&args->tmp_kstr);
-                kputw(len,&args->tmp_kstr);
-            }
-            else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
-            {
-                kputc('\t',&args->tmp_kstr);
-                kputd((double)len/(end-beg+1),&args->tmp_kstr);
-            }
-        }
-        write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
-    }
-
+    write_annots(args);
     write_string(args, "\n", 1);
     cols_destroy(dst_cols);
 }
