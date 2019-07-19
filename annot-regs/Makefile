@@ -20,9 +20,9 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-CC      = gcc
-CFLAGS  = -Wall -g -O2 -I ../libs -I ../htslib
-LDLIBS  = ../libs/regidx.o ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lpthread
+CC     ?= gcc
+CFLAGS ?= -Wall -g -O2 -I ../libs -I ../htslib
+LDLIBS ?= ../libs/regidx.o ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lpthread
 BIN     = annot-regs
 SOURCES = annot-regs.c
 OBJECTS = $(SOURCES:.c=.o)
