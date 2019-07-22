@@ -244,6 +244,8 @@ void cols_destroy(cols_t *cols)
 
 int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uint32_t *beg, uint32_t *end, void *payload, void *usr)
 {
+    static int beg_end_warned = 0;
+
     if ( line[0]=='#' )
     {
         *((cols_t**)payload) = NULL;
@@ -268,6 +270,14 @@ int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uin
     ptr = cols->off[ dat->core_idx[2] ];
     *end = strtod(ptr, &tmp);
     if ( tmp==ptr ) error("Error: Could not parse: %s\n", line);
+
+    if ( *end < *beg )
+    {
+        if ( !beg_end_warned )
+            fprintf(stderr,"Warning: the start coordinate is bigger than the end coordinate:\n\t%s\nThis message is printed only once.\n",line);
+        beg_end_warned = 1;
+        uint32_t tmp = *beg; *beg = *end; *end = tmp;
+    }
 
     return 0;
 }
@@ -386,50 +396,58 @@ void init_data(args_t *args)
     sanity_check_columns(args->src.fname, args->src.hdr, args->src.core, &args->src.core_idx, 0);
     sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.core, &args->dst.core_idx, 0);
     if ( args->src.core->n!=3 || args->dst.core->n!=3 ) error("Expected three columns: %s\n", args->core_str);
+    cols_destroy(tmp);
 
     // -m, match columns
     if ( args->match_str )
     {
-        tmp = cols_split(args->match_str, tmp, ':');
+        tmp = cols_split(args->match_str, NULL, ':');
         args->src.match = cols_split(tmp->off[0],NULL,',');
         args->dst.match = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
         sanity_check_columns(args->src.fname, args->src.hdr, args->src.match, &args->src.match_idx, 0);
         sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.match, &args->dst.match_idx, 0);
         if ( args->src.match->n != args->dst.match->n ) error("Expected equal number of columns: %s\n", args->match_str);
+        cols_destroy(tmp);
     }
 
+    if ( !args->transfer_str && !args->annots_str ) error("Missing the -t, --transfer or the -a, --annotate option\n");
+
     // -t, transfer columns
-    if ( !args->transfer_str ) error("Missing the -t, --transfer option\n");
-    tmp = cols_split(args->transfer_str, tmp, ':');
-    args->src.transfer = cols_split(tmp->off[0],NULL,',');
-    args->dst.transfer = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
-    sanity_check_columns(args->src.fname, args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
-    sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
-    if ( args->src.transfer->n != args->dst.transfer->n ) error("Expected equal number of columns: %s\n", args->transfer_str);
     int i;
-    for (i=0; i<args->src.transfer->n; i++)
+    if ( args->transfer_str )
     {
-        if ( args->src.transfer_idx[i]==-1 )
+        tmp = cols_split(args->transfer_str, NULL, ':');
+        args->src.transfer = cols_split(tmp->off[0],NULL,',');
+        args->dst.transfer = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
+        sanity_check_columns(args->src.fname, args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
+        sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
+        if ( args->src.transfer->n != args->dst.transfer->n ) error("Expected equal number of columns: %s\n", args->transfer_str);
+        for (i=0; i<args->src.transfer->n; i++)
         {
-            cols_append(args->src.hdr->cols,args->src.transfer->off[i]);
-            args->src.transfer_idx[i] = -args->src.hdr->cols->n;    // negative index indicates different ptr location
-            args->src.grow_n++;
+            if ( args->src.transfer_idx[i]==-1 )
+            {
+                cols_append(args->src.hdr->cols,args->src.transfer->off[i]);
+                args->src.transfer_idx[i] = -args->src.hdr->cols->n;    // negative index indicates different ptr location
+                args->src.grow_n++;
+            }
         }
-    }
-    for (i=0; i<args->dst.transfer->n; i++)
-    {
-        if ( args->dst.transfer_idx[i]==-1 )
+        for (i=0; i<args->dst.transfer->n; i++)
         {
-            cols_append(args->dst.hdr->cols,args->dst.transfer->off[i]);
-            args->dst.transfer_idx[i] = args->dst.hdr->cols->n - 1;
-            args->dst.grow_n++;
+            if ( args->dst.transfer_idx[i]==-1 )
+            {
+                cols_append(args->dst.hdr->cols,args->dst.transfer->off[i]);
+                args->dst.transfer_idx[i] = args->dst.hdr->cols->n - 1;
+                args->dst.grow_n++;
+            }
         }
+        args->tmp_cols = (cols_t*)calloc(args->src.transfer->n,sizeof(cols_t));
+        args->tmp_hash = (khash_t(str2int)**)calloc(args->src.transfer->n,sizeof(khash_t(str2int)*));
+        for (i=0; i<args->src.transfer->n; i++)
+            args->tmp_hash[i] = khash_str2int_init();
+        cols_destroy(tmp);
     }
-    args->tmp_cols = (cols_t*)calloc(args->src.transfer->n,sizeof(cols_t));
-    args->tmp_hash = (khash_t(str2int)**)calloc(args->src.transfer->n,sizeof(khash_t(str2int)*));
-    for (i=0; i<args->src.transfer->n; i++)
-        args->tmp_hash[i] = khash_str2int_init();
-    cols_destroy(tmp);
+    else
+        args->src.transfer = calloc(1,sizeof(*args->src.transfer));
 
     // -a, annotation columns
     if ( args->annots_str )
