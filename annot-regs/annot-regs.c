@@ -85,7 +85,7 @@ typedef struct
     dat_t dst, src;
     char *core_str, *match_str, *transfer_str, *annots_str;
     char *temp_dir;
-    int allow_dups, reciprocal;
+    int allow_dups, reciprocal, ignore_headers;
     float overlap;
     regidx_t *idx;
     regitr_t *itr;
@@ -287,19 +287,31 @@ void free_payload(void *payload)
     cols_destroy(cols);
 }
 
-hdr_t *parse_header(char *fname)
+// Parse header if present (first line has a leading #) or create a dummy header with
+// numeric column names. If dummy is set, read first data line (without a leading #)
+// and create a dummy header.
+hdr_t *parse_header(char *fname, int dummy)
 {
     hdr_t *hdr = (hdr_t*) calloc(1, sizeof(hdr_t));
 
     htsFile *fp = hts_open(fname,"r");
     if ( !fp ) error("Failed to open: %s\n", fname);
+    cols_t *cols = NULL;
     kstring_t line = {0,0,0};
-    if ( hts_getline(fp, KS_SEP_LINE, &line) <= 0 ) error("Failed to read: %s\n", fname);
 
-    cols_t *cols = cols_split(line.s, NULL, '\t');
-    assert(cols && cols->n);
-    if ( cols->off[0][0] != '#' )
+    while ( hts_getline(fp, KS_SEP_LINE, &line) > 0 )
     {
+        if ( line.s[0]=='#' )
+        {
+            if ( dummy ) continue;
+            cols = cols_split(line.s, NULL, '\t');
+            break;
+        }
+
+        cols = cols_split(line.s, NULL, '\t');
+        assert(cols && cols->n);
+        assert(cols->off[0][0] != '#');
+
         kstring_t str = {0,0,0};
         int i, n = cols->n;
         for (i=0; i<n; i++)
@@ -311,7 +323,11 @@ hdr_t *parse_header(char *fname)
         cols = cols_split(str.s, NULL, '\t');
         free(str.s);
         hdr->dummy = 1;
+
+        break;
     }
+    if ( !line.l ) error("Failed to read: %s\n", fname);
+    assert(cols && cols->n);
 
     hdr->name2idx = khash_str2int_init();
     int i;
@@ -385,8 +401,8 @@ void sanity_check_columns(char *fname, hdr_t *hdr, cols_t *cols, int **col2idx, 
 }
 void init_data(args_t *args)
 {
-    args->dst.hdr = parse_header(args->dst.fname);
-    args->src.hdr = parse_header(args->src.fname);
+    args->dst.hdr = parse_header(args->dst.fname, args->ignore_headers);
+    args->src.hdr = parse_header(args->src.fname, args->ignore_headers);
 
     // -c, core columns
     if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end"; 
@@ -669,6 +685,7 @@ static const char *usage_text(void)
         "                                       nbp  .. number of source base pairs in the overlap\n"
         "   -c, --core src:dst              Core columns [chr,beg,end:chr,beg,end]\n"
         "   -d, --dst-file file             Destination file\n"
+        "   -H, --ignore-headers            Use numeric indexes, ignore the headers completely\n"
         "   -m, --match src:dst             Require match in these columns\n"
         "   -o, --overlap float             Minimum required overlap (non-reciprocal, unless -r is given)\n"
         "   -r, --reciprocal                Require reciprocal overlap\n"
@@ -699,6 +716,7 @@ int main(int argc, char **argv)
         {"annotate",required_argument,NULL,'a'},
         {"core",required_argument,NULL,'c'},
         {"dst-file",required_argument,NULL,'d'},
+        {"ignore-headers",no_argument,NULL,'H'},
         {"match",required_argument,NULL,'m'},
         {"overlap",required_argument,NULL,'o'},
         {"reciprocal",no_argument,NULL,'r'},
@@ -708,12 +726,13 @@ int main(int argc, char **argv)
     };
     char *tmp = NULL;
     int c;
-    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:H",loptions,NULL)) >= 0)
     {
         switch (c) 
         {
             case  0 : args->allow_dups = 1; break;
             case  1 : printf("%s\n",ANNOT_REGS_VERSION); return 0; break;
+            case 'H': args->ignore_headers = 1; break;
             case 'r': args->reciprocal = 1; break;
             case 'c': args->core_str  = optarg; break;
             case 'd': args->dst.fname = optarg; break;
