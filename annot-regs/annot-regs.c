@@ -55,10 +55,12 @@ hdr_t;
 typedef struct
 {
     char *fname;
-    hdr_t *hdr;
+    hdr_t hdr;
     cols_t *core, *match, *transfer, *annots;
     int *core_idx, *match_idx, *transfer_idx, *annots_idx;
     int grow_n;
+    kstring_t line;     // one buffered line, a byproduct of reading the header
+    htsFile *fp;
 }
 dat_t;
 
@@ -88,7 +90,6 @@ typedef struct
     float overlap;
     regidx_t *idx;
     regitr_t *itr;
-    htsFile *fh;
     kstring_t tmp_kstr;
     cols_t *tmp_cols;               // the -t transfer fields to write for each line
     khash_t(str2int) **tmp_hash;    // lookup tables for tmp_cols
@@ -274,16 +275,13 @@ void free_payload(void *payload)
     cols_destroy(cols);
 }
 
-hdr_t *parse_header(char *fname)
+void parse_header(dat_t *dat, char *fname)
 {
-    hdr_t *hdr = (hdr_t*) calloc(1, sizeof(hdr_t));
+    dat->fp = hts_open(fname,"r");
+    if ( !dat->fp ) error("Failed to open: %s\n", fname);
+    if ( hts_getline(dat->fp, KS_SEP_LINE, &dat->line) <= 0 ) error("Failed to read: %s\n", fname);
 
-    htsFile *fp = hts_open(fname,"r");
-    if ( !fp ) error("Failed to open: %s\n", fname);
-    kstring_t line = {0,0,0};
-    if ( hts_getline(fp, KS_SEP_LINE, &line) <= 0 ) error("Failed to read: %s\n", fname);
-
-    cols_t *cols = cols_split(line.s, NULL, '\t');
+    cols_t *cols = cols_split(dat->line.s, NULL, '\t');
     assert(cols && cols->n);
     if ( cols->off[0][0] != '#' )
     {
@@ -297,16 +295,16 @@ hdr_t *parse_header(char *fname)
         cols_destroy(cols);
         cols = cols_split(str.s, NULL, '\t');
         free(str.s);
-        hdr->dummy = 1;
+        dat->hdr.dummy = 1;
     }
 
-    hdr->name2idx = khash_str2int_init();
+    dat->hdr.name2idx = khash_str2int_init();
     int i;
     for (i=0; i<cols->n; i++)
     {
         char *ss = cols->off[i];
         while ( *ss && (*ss=='#' || isspace(*ss)) ) ss++;
-        if ( !*ss ) error("Could not parse the header field \"%s\": %s\n", cols->off[i],line.s);
+        if ( !*ss ) error("Could not parse the header field \"%s\": %s\n", cols->off[i],dat->line.s);
         if ( *ss=='[' )
         {
             char *se = ss+1;
@@ -314,46 +312,48 @@ hdr_t *parse_header(char *fname)
             if ( *se==']' ) ss = se + 1;
         }
         while ( *ss && (*ss=='#' || isspace(*ss)) ) ss++;
-        if ( !*ss ) error("Could not parse the header field \"%s\": %s\n", cols->off[i],line.s);
+        if ( !*ss ) error("Could not parse the header field \"%s\": %s\n", cols->off[i],dat->line.s);
         cols->off[i] = ss;
-        khash_str2int_set(hdr->name2idx, cols->off[i], i);
+        khash_str2int_set(dat->hdr.name2idx, cols->off[i], i);
     }
-    hdr->cols = cols;
-
-    free(line.s);
-    hts_close(fp);
-
-    return hdr;
+    dat->hdr.cols = cols;
+    if ( !dat->hdr.dummy ) dat->line.l = 0;
 }
-void write_header(hdr_t *hdr)
+void write_header(dat_t *dat)
 {
-    if ( hdr->dummy ) return;
+    if ( dat->hdr.dummy ) return;
     int i;
     kstring_t str = {0,0,0};
     kputc('#', &str);
-    for (i=0; i<hdr->cols->n; i++)
+    for (i=0; i<dat->hdr.cols->n; i++)
     {
         if ( i>0 ) kputc('\t', &str);
         ksprintf(&str,"[%d]", i+1);
-        kputs(hdr->cols->off[i], &str);
+        kputs(dat->hdr.cols->off[i], &str);
     }
-    if ( hdr->annots )
+    if ( dat->hdr.annots )
     {
-        for (i=0; i<hdr->annots->n; i++)
+        for (i=0; i<dat->hdr.annots->n; i++)
         {
             if ( str.l > 1 ) kputc('\t', &str);
-            kputs(hdr->annots->off[i], &str);
+            kputs(dat->hdr.annots->off[i], &str);
         }
     }
     kputc('\n',&str);
     if ( fwrite(str.s, str.l, 1, stdout) != 1 ) error("Failed to write %d bytes\n", str.l);
     free(str.s);
 }
-void destroy_header(hdr_t *hdr)
+void destroy_header(dat_t *dat)
 {
-    if ( hdr->cols ) cols_destroy(hdr->cols);
-    khash_str2int_destroy(hdr->name2idx);
-    free(hdr);
+    if ( dat->hdr.cols ) cols_destroy(dat->hdr.cols);
+    khash_str2int_destroy(dat->hdr.name2idx);
+}
+
+static int read_next_line(dat_t *dat)
+{
+    if ( dat->line.l ) return dat->line.l;
+    if ( hts_getline(dat->fp, KS_SEP_LINE, &dat->line) > 0 ) return dat->line.l;
+    return 0;
 }
 
 void sanity_check_columns(char *fname, hdr_t *hdr, cols_t *cols, int **col2idx, int force)
@@ -372,16 +372,16 @@ void sanity_check_columns(char *fname, hdr_t *hdr, cols_t *cols, int **col2idx, 
 }
 void init_data(args_t *args)
 {
-    args->dst.hdr = parse_header(args->dst.fname);
-    args->src.hdr = parse_header(args->src.fname);
+    parse_header(&args->dst, args->dst.fname);
+    parse_header(&args->src, args->src.fname);
 
     // -c, core columns
     if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end"; 
     cols_t *tmp = cols_split(args->core_str, NULL, ':');
     args->src.core = cols_split(tmp->off[0],NULL,',');
     args->dst.core = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
-    sanity_check_columns(args->src.fname, args->src.hdr, args->src.core, &args->src.core_idx, 0);
-    sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.core, &args->dst.core_idx, 0);
+    sanity_check_columns(args->src.fname, &args->src.hdr, args->src.core, &args->src.core_idx, 0);
+    sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.core, &args->dst.core_idx, 0);
     if ( args->src.core->n!=3 || args->dst.core->n!=3 ) error("Expected three columns: %s\n", args->core_str);
 
     // -m, match columns
@@ -390,8 +390,8 @@ void init_data(args_t *args)
         tmp = cols_split(args->match_str, tmp, ':');
         args->src.match = cols_split(tmp->off[0],NULL,',');
         args->dst.match = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
-        sanity_check_columns(args->src.fname, args->src.hdr, args->src.match, &args->src.match_idx, 0);
-        sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.match, &args->dst.match_idx, 0);
+        sanity_check_columns(args->src.fname, &args->src.hdr, args->src.match, &args->src.match_idx, 0);
+        sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.match, &args->dst.match_idx, 0);
         if ( args->src.match->n != args->dst.match->n ) error("Expected equal number of columns: %s\n", args->match_str);
     }
 
@@ -400,16 +400,16 @@ void init_data(args_t *args)
     tmp = cols_split(args->transfer_str, tmp, ':');
     args->src.transfer = cols_split(tmp->off[0],NULL,',');
     args->dst.transfer = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
-    sanity_check_columns(args->src.fname, args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
-    sanity_check_columns(args->dst.fname, args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
+    sanity_check_columns(args->src.fname, &args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
+    sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
     if ( args->src.transfer->n != args->dst.transfer->n ) error("Expected equal number of columns: %s\n", args->transfer_str);
     int i;
     for (i=0; i<args->src.transfer->n; i++)
     {
         if ( args->src.transfer_idx[i]==-1 )
         {
-            cols_append(args->src.hdr->cols,args->src.transfer->off[i]);
-            args->src.transfer_idx[i] = -args->src.hdr->cols->n;    // negative index indicates different ptr location
+            cols_append(args->src.hdr.cols,args->src.transfer->off[i]);
+            args->src.transfer_idx[i] = -args->src.hdr.cols->n;    // negative index indicates different ptr location
             args->src.grow_n++;
         }
     }
@@ -417,8 +417,8 @@ void init_data(args_t *args)
     {
         if ( args->dst.transfer_idx[i]==-1 )
         {
-            cols_append(args->dst.hdr->cols,args->dst.transfer->off[i]);
-            args->dst.transfer_idx[i] = args->dst.hdr->cols->n - 1;
+            cols_append(args->dst.hdr.cols,args->dst.transfer->off[i]);
+            args->dst.transfer_idx[i] = args->dst.hdr.cols->n - 1;
             args->dst.grow_n++;
         }
     }
@@ -445,15 +445,18 @@ void init_data(args_t *args)
         args->nbp = nbp_init();
     }
 
-    args->idx = regidx_init(args->src.fname, parse_tab_with_payload,free_payload,sizeof(cols_t),&args->src);
+    args->idx = regidx_init(NULL, parse_tab_with_payload,free_payload,sizeof(cols_t),&args->src);
+    while ( read_next_line(&args->src) )
+    {
+        if ( regidx_insert(args->idx,args->src.line.s) !=0 ) error("Could not parse the region in %s: %s\n",args->src.fname,args->src.line.s);
+        args->src.line.l = 0;
+    }
     args->itr = regitr_init(args->idx);
-
-    args->fh = hts_open(args->dst.fname,"r");
-    if ( !args->fh ) error("Failed to read: %s\n", args->dst.fname);
+    if ( hts_close(args->src.fp)!=0 ) error("Failed to close: %s\n", args->src.fname);
 }
 void destroy_data(args_t *args)
 {
-    if ( hts_close(args->fh)!=0 ) error("Failed to close: %s\n", args->dst.fname);
+    if ( hts_close(args->dst.fp)!=0 ) error("Failed to close: %s\n", args->dst.fname);
     int i;
     for (i=0; i<args->src.transfer->n; i++)
         khash_str2int_destroy(args->tmp_hash[i]);
@@ -469,8 +472,8 @@ void destroy_data(args_t *args)
     if ( args->src.annots ) cols_destroy(args->src.annots);
     if ( args->dst.annots ) cols_destroy(args->dst.annots);
     if ( args->nbp ) nbp_destroy(args->nbp);
-    destroy_header(args->src.hdr);
-    destroy_header(args->dst.hdr);
+    destroy_header(&args->src);
+    destroy_header(&args->dst);
     free(args->src.core_idx);
     free(args->dst.core_idx);
     free(args->src.match_idx);
@@ -558,7 +561,7 @@ void process_line(args_t *args, char *line, size_t size)
             if ( args->src.transfer_idx[i] >= 0 )
                 str = src_cols->off[ args->src.transfer_idx[i] ];                   // transfer a value from the src file
             else
-                str = args->src.hdr->cols->off[ -args->src.transfer_idx[i] - 1 ];    // non-existent field in src, use a default value
+                str = args->src.hdr.cols->off[ -args->src.transfer_idx[i] - 1 ];    // non-existent field in src, use a default value
 
             if ( !args->allow_dups )
             {
@@ -661,6 +664,10 @@ static const char *usage_text(void)
         "\n"
         "   # If the dst part is not given, the program assumes that the src:dst columns are identical\n"
         "   annot-regs -s src.txt.gz -d dst.txt.gz -c chr,beg,end -m type,sample -t tp/fp\n"
+        "\n"
+        "   # One of source or destination files can be streamed to stdin\n"
+        "   gunzip -c src.txt.gz | annot-regs -d dst.txt.gz -c chr,beg,end -m type,sample -t tp/fp\n"
+        "   gunzip -c dst.txt.gz | annot-regs -s src.txt.gz -c chr,beg,end -m type,sample -t tp/fp\n"
         "\n";
 }
 
@@ -706,21 +713,24 @@ int main(int argc, char **argv)
         }
     }
     if ( argc==1 ) error("%sVersion: %s\n\n",usage_text(), ANNOT_REGS_VERSION);
-    if ( !args->dst.fname ) error("Missing the -d option\n");
-    if ( !args->src.fname ) error("Missing the -s option\n");
-
-    init_data(args);
-    kstring_t line = {0,0,0};
-
-    write_header(args->dst.hdr);
-    while ( hts_getline(args->fh, KS_SEP_LINE, &line) > 0 )
+    if ( !args->dst.fname && !args->src.fname ) error("Missing the -d and -s options\n");
+    if ( !args->dst.fname || !args->src.fname )
     {
-        int i;
-        for (i=0; i<args->dst.grow_n; i++) kputs("\t.", &line);
-        process_line(args, line.s, line.l);
+        if ( isatty(fileno((FILE *)stdin)) ) error("Missing the %s option\n",args->dst.fname?"-s":"-d");
+        // reading from stdin
+        if ( !args->dst.fname ) args->dst.fname = "-";
+        if ( !args->src.fname ) args->src.fname = "-";
     }
 
-    free(line.s);
+    init_data(args);
+    write_header(&args->dst);
+    while ( read_next_line(&args->dst) )
+    {
+        int i;
+        for (i=0; i<args->dst.grow_n; i++) kputs("\t.", &args->dst.line);
+        process_line(args, args->dst.line.s, args->dst.line.l);
+        args->dst.line.l = 0;
+    }
     destroy_data(args);
     free(args);
 
