@@ -58,6 +58,7 @@ typedef struct
     hdr_t hdr;
     cols_t *core, *match, *transfer, *annots;
     int *core_idx, *match_idx, *transfer_idx, *annots_idx;
+    int *nannots_added; // for --max-annots: the number of annotations added
     int grow_n;
     kstring_t line;     // one buffered line, a byproduct of reading the header
     htsFile *fp;
@@ -87,7 +88,7 @@ typedef struct
     dat_t dst, src;
     char *core_str, *match_str, *transfer_str, *annots_str;
     char *temp_dir;
-    int allow_dups, reciprocal, ignore_headers;
+    int allow_dups, reciprocal, ignore_headers, max_annots;
     float overlap;
     regidx_t *idx;
     regitr_t *itr;
@@ -467,6 +468,7 @@ void init_data(args_t *args)
     }
     else
         args->src.transfer = calloc(1,sizeof(*args->src.transfer));
+    args->src.nannots_added = calloc(args->src.transfer->n,sizeof(*args->src.nannots_added));
 
     // -a, annotation columns
     if ( args->annots_str )
@@ -515,6 +517,7 @@ void destroy_data(args_t *args)
     if ( args->nbp ) nbp_destroy(args->nbp);
     destroy_header(&args->src);
     destroy_header(&args->dst);
+    free(args->src.nannots_added);
     free(args->src.core_idx);
     free(args->dst.core_idx);
     free(args->src.match_idx);
@@ -523,6 +526,8 @@ void destroy_data(args_t *args)
     free(args->dst.transfer_idx);
     free(args->src.annots_idx);
     free(args->dst.annots_idx);
+    free(args->src.line.s);
+    free(args->dst.line.s);
     if (args->itr) regitr_destroy(args->itr);
     if (args->idx) regidx_destroy(args->idx);
     free(args->tmp_kstr.s);
@@ -581,6 +586,7 @@ void process_line(args_t *args, char *line, size_t size)
 
     for (i=0; i<args->src.transfer->n; i++)
     {
+        args->src.nannots_added[i] = 0;
         args->tmp_cols[i].n = 0;
         kh_clear(str2int, args->tmp_hash[i]);
     }
@@ -618,6 +624,7 @@ void process_line(args_t *args, char *line, size_t size)
         if ( args->nbp )
             nbp_add(args->nbp, args->itr->beg >= beg ? args->itr->beg : beg, args->itr->end <= end ? args->itr->end : end);
 
+        int max_annots_reached = 0;
         for (i=0; i<args->src.transfer->n; i++)
         {
             char *str;
@@ -631,9 +638,14 @@ void process_line(args_t *args, char *line, size_t size)
                 if ( khash_str2int_has_key(args->tmp_hash[i],str) ) continue;
                 khash_str2int_set(args->tmp_hash[i],str,1);
             }
+            if ( args->max_annots )
+            {
+                if ( ++args->src.nannots_added[i] >= args->max_annots ) max_annots_reached = 1;
+            }
             cols_append(&args->tmp_cols[i], str);
             has_overlap += strlen(str);
         }
+        if ( max_annots_reached ) break;
     }
 
     if ( !has_overlap )
@@ -693,6 +705,7 @@ static const char *usage_text(void)
         "   -d, --dst-file file             Destination file\n"
         "   -H, --ignore-headers            Use numeric indexes, ignore the headers completely\n"
         "   -m, --match src:dst             Require match in these columns\n"
+        "       --max-annots int            Adding at most int annotations per column to save time in big regions\n"
         "   -o, --overlap float             Minimum required overlap (non-reciprocal, unless -r is given)\n"
         "   -r, --reciprocal                Require reciprocal overlap\n"
         "   -s, --src-file file             Source file\n"
@@ -723,6 +736,7 @@ int main(int argc, char **argv)
     {
         {"allow-dups",no_argument,NULL,0},
         {"version",no_argument,NULL,1},
+        {"max-annots",required_argument,NULL,2},
         {"annotate",required_argument,NULL,'a'},
         {"core",required_argument,NULL,'c'},
         {"dst-file",required_argument,NULL,'d'},
@@ -742,6 +756,10 @@ int main(int argc, char **argv)
         {
             case  0 : args->allow_dups = 1; break;
             case  1 : printf("%s\n",UTILS_VERSION); return 0; break;
+            case  2 : 
+                args->max_annots = strtod(optarg, &tmp); 
+                if ( tmp==optarg || *tmp ) error("Could not parse --max-annots  %s\n", optarg);
+                break;
             case 'H': args->ignore_headers = 1; break;
             case 'r': args->reciprocal = 1; break;
             case 'c': args->core_str  = optarg; break;
