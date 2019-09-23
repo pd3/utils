@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Genome Research Ltd.
+# Copyright (C) 2018-2019 Genome Research Ltd.
 #
 # Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -20,33 +20,30 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+CC     ?= gcc
+CFLAGS ?= -Wall -g -O2 -I ../libs
+LDLIBS ?= ../libs/dist.o -lm
+BIN     = dist
+SOURCES = dist.c
+OBJECTS = $(SOURCES:.c=.o)
 
-# Edit the location of HTSlib here or run as HTSDIR=/path/to/htslib make
-export HTSDIR = ../htslib
+all: $(BIN)
 
+dist.o: ../libs/version.h dist.c
 
-TARGETS = annot-regs dist
+%.o: %.c
+	$(CC) $(CFLAGS) -c $<
 
-all:
-	@$(MAKE) libs/version.h; \
-    ln -fs $(HTSDIR) htslib; \
-    $(MAKE) -C libs; \
-	for T in $(TARGETS) ; do $(MAKE) -C $$T; done
+$(BIN):%: $(OBJECTS)
+	$(CC) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
+
+test: $(BIN)
+	./test/test.pl
 
 clean:
-	@$(MAKE) -C libs clean; \
-    for T in $(TARGETS) ; do $(MAKE) -C $$T clean; done
+	rm -f $(BIN) *.o *.a *~
 
-test:
-	@for T in $(TARGETS) ; do $(MAKE) -C $$T test; done
+force:
 
-
-PACKAGE_VERSION := 1.0.$(shell git describe --always --dirty)
-libs/version.h: $(if $(wildcard version.h),$(if $(findstring "$(PACKAGE_VERSION)",$(shell cat version.h)),,force))
-
-libs/version.h:
-	echo '#define UTILS_VERSION "$(PACKAGE_VERSION)"' > $@
-
-
-
+.PHONY: all clean test
 

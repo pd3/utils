@@ -731,7 +731,7 @@ int main(int argc, char **argv)
         switch (c) 
         {
             case  0 : args->allow_dups = 1; break;
-            case  1 : printf("%s\n",ANNOT_REGS_VERSION); return 0; break;
+            case  1 : printf("%s\n",UTILS_VERSION); return 0; break;
             case 'H': args->ignore_headers = 1; break;
             case 'r': args->reciprocal = 1; break;
             case 'c': args->core_str  = optarg; break;
@@ -746,10 +746,10 @@ int main(int argc, char **argv)
             case 't': args->transfer_str = optarg; break;
             case 'h':
             case '?':
-            default: error("%sVersion: %s\n\n", usage_text(), ANNOT_REGS_VERSION); break;
+            default: error("%sVersion: %s\n\n", usage_text(), UTILS_VERSION); break;
         }
     }
-    if ( argc==1 ) error("%sVersion: %s\n\n",usage_text(), ANNOT_REGS_VERSION);
+    if ( argc==1 ) error("%sVersion: %s\n\n",usage_text(), UTILS_VERSION);
     if ( !args->dst.fname ) error("Missing the -d option\n");
     if ( !args->src.fname ) error("Missing the -s option\n");
 

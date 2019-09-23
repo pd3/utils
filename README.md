@@ -8,3 +8,7 @@ This program is a solution to these common problems:
  - transfer a field from one file to another
  
 See the [slides](https://raw.githubusercontent.com/pd3/utils/master/annot-regs/doc.annot-regs.pdf) for documentation and usage examples.
+
+## [dist][dist.md]
+A small, fast and memory-efficient program for collecting empirical distributions with very long tails.
+

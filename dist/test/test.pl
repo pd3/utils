@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-#   Copyright (C) 2018 Genome Research Ltd.
+#   Copyright (C) 2019 Genome Research Ltd.
 #
 #   Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -32,22 +32,7 @@ use File::Temp qw/ tempfile tempdir /;
 use Cwd qw/ abs_path /;
 
 my $opts = parse_params();
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.1.txt',args=>'-t smpl:overlap --allow-dups');
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.2.txt',args=>'-t smpl:overlap');
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.2.txt',args=>'-t smpl:overlap -c chr,beg,end');
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.3.txt',args=>'-t smpl,value:overlap,value');
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.4.txt',args=>'-t smpl:overlap -o 0.5');
-test_annot_regs($opts,src=>'src.1.txt',dst=>'dst.1.txt',out=>'out.1.5.txt',args=>'-t smpl:overlap -ro 0.5');
-test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.1.txt',args=>'-c 1,2,3:1,2,3 -t 4:5 --allow-dups');
-test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.2.txt',args=>'-c 1,2,3:1,2,3 -t 4:5');
-test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.3.txt',args=>'-c 1,2,3:1,2,3 -t 4,value:5,value');
-test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.4.txt',args=>'-c 1,2,3:1,2,3 -t value,4:value,5');
-test_annot_regs($opts,src=>'src.2.txt',dst=>'dst.2.txt',out=>'out.2.5.txt',args=>'-c 1,2,3:1,2,3 -t value,4:value,5 -a nbp,frac');
-test_annot_regs($opts,src=>'src.3.txt',dst=>'dst.3.txt',out=>'out.3.1.txt',args=>'-t smpl:overlap -a nbp,frac');
-test_annot_regs($opts,src=>'src.4.txt',dst=>'dst.4.txt',out=>'out.4.1.txt',args=>'-c 2,3,4:2,3,4 -m 1:1 -t 1:1 -a nbp,frac');
-test_annot_regs($opts,src=>'src.5.txt',dst=>'dst.5.txt',out=>'out.5.1.txt',args=>'-c 2,3,4:2,3,4 -a nbp,frac');
-test_annot_regs($opts,src=>'src.6.txt',dst=>'dst.6.txt',out=>'out.6.1.txt',args=>'-c 1,2,2:1,2,2 -a nbp');
-test_annot_regs($opts,src=>'src.7.txt',dst=>'dst.7.txt',out=>'out.7.1.txt',args=>'-c 1,2,2:1,2,2 -t overlap -H');
+test_dist($opts,out=>'out.1.txt',in=>'for i in $(seq 1 50); do echo $i; done',args=>'-n 1');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};
@@ -219,10 +204,10 @@ sub is_file_newer
 
 # The tests --------------------------
 
-sub test_annot_regs
+sub test_dist
 {
     my ($opts,%args) = @_;
     my $args  = exists($args{args}) ? $args{args} : '';
-    test_cmd($opts,%args,cmd=>"$$opts{bin}/annot-regs $args -s $$opts{path}/$args{src} -d $$opts{path}/$args{dst}");
+    test_cmd($opts,%args,cmd=>"$args{in} | $$opts{bin}/dist $args");
 }
 

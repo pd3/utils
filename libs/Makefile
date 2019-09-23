@@ -23,7 +23,7 @@
 CC      = gcc
 CFLAGS  = -Wall -g -O2 -I ../htslib
 LDLIBS  = ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lcrypto -lcrypt -lpthread
-LIBS    = regidx.o
+LIBS    = regidx.o dist.o
 
 all: $(LIBS)
 
