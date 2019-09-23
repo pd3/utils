@@ -20,9 +20,11 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+include $(HTSDIR)/htslib_static.mk
+
 CC      = gcc
-CFLAGS  = -Wall -g -O2 -I ../htslib
-LDLIBS  = ../htslib/libhts.a -llzma -lbz2 -lz -lm -lcurl -lcrypto -lcrypt -lpthread
+CFLAGS  = -Wall -g -O2 -I $(HTSDIR)
+LDLIBS ?= $(HTSDIR)/libhts.a $(HTSLIB_static_LIBS)
 LIBS    = regidx.o
 
 all: $(LIBS)

@@ -76,7 +76,8 @@ dat_t;
 typedef struct
 {
     int n,m;
-    uint32_t *regs; // change to uint64_t for very large genomes
+    uint32_t *regs;     // change to uint64_t for very large genomes
+    uint32_t beg,end;   // the current destination interval
 }
 nbp_t;
 
@@ -86,7 +87,7 @@ typedef struct
     dat_t dst, src;
     char *core_str, *match_str, *transfer_str, *annots_str;
     char *temp_dir;
-    int allow_dups, reciprocal;
+    int allow_dups, reciprocal, ignore_headers;
     float overlap;
     regidx_t *idx;
     regitr_t *itr;
@@ -114,9 +115,11 @@ static void nbp_destroy(nbp_t *nbp)
     free(nbp->regs);
     free(nbp);
 }
-static inline void nbp_reset(nbp_t *nbp)
+static inline void nbp_reset(nbp_t *nbp, uint32_t beg, uint32_t end)
 {
-    nbp->n = 0;
+    nbp->n   = 0;
+    nbp->beg = beg;
+    nbp->end = end;
 }
 static inline void nbp_add(nbp_t *nbp, uint32_t beg, uint32_t end)
 {
@@ -242,6 +245,8 @@ void cols_destroy(cols_t *cols)
 
 int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uint32_t *beg, uint32_t *end, void *payload, void *usr)
 {
+    static int beg_end_warned = 0;
+
     if ( line[0]=='#' )
     {
         *((cols_t**)payload) = NULL;
@@ -267,6 +272,14 @@ int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uin
     *end = strtod(ptr, &tmp);
     if ( tmp==ptr ) error("Error: Could not parse: %s\n", line);
 
+    if ( *end < *beg )
+    {
+        if ( !beg_end_warned )
+            fprintf(stderr,"Warning: the start coordinate is bigger than the end coordinate:\n\t%s\nThis message is printed only once.\n",line);
+        beg_end_warned = 1;
+        uint32_t tmp = *beg; *beg = *end; *end = tmp;
+    }
+
     return 0;
 }
 void free_payload(void *payload)
@@ -275,16 +288,31 @@ void free_payload(void *payload)
     cols_destroy(cols);
 }
 
-void parse_header(dat_t *dat, char *fname)
+// Parse header if present (first line has a leading #) or create a dummy header with
+// numeric column names. If dummy is set, read first data line (without a leading #)
+// and create a dummy header.
+void parse_header(dat_t *dat, char *fname, int dummy)
 {
     dat->fp = hts_open(fname,"r");
     if ( !dat->fp ) error("Failed to open: %s\n", fname);
-    if ( hts_getline(dat->fp, KS_SEP_LINE, &dat->line) <= 0 ) error("Failed to read: %s\n", fname);
 
-    cols_t *cols = cols_split(dat->line.s, NULL, '\t');
-    assert(cols && cols->n);
-    if ( cols->off[0][0] != '#' )
+    cols_t *cols = NULL;
+    while ( hts_getline(dat->fp, KS_SEP_LINE, &dat->line) > 0 )
     {
+        if ( dat->line.s[0]=='#' )
+        {
+            // this is a header or comment line
+            if ( dummy ) continue;
+            cols = cols_split(dat->line.s, NULL, '\t');
+            break;
+        }
+
+        // this a data line, we must be in a dummy mode
+        cols = cols_split(dat->line.s, NULL, '\t');
+        assert(cols && cols->n);
+        assert(cols->off[0][0] != '#');
+
+        // create a dummy header with numeric field names
         kstring_t str = {0,0,0};
         int i, n = cols->n;
         for (i=0; i<n; i++)
@@ -296,7 +324,11 @@ void parse_header(dat_t *dat, char *fname)
         cols = cols_split(str.s, NULL, '\t');
         free(str.s);
         dat->hdr.dummy = 1;
+
+        break;
     }
+    if ( !dat->line.l ) error("Failed to read: %s\n", fname);
+    assert(cols && cols->n);
 
     dat->hdr.name2idx = khash_str2int_init();
     int i;
@@ -372,8 +404,8 @@ void sanity_check_columns(char *fname, hdr_t *hdr, cols_t *cols, int **col2idx, 
 }
 void init_data(args_t *args)
 {
-    parse_header(&args->dst, args->dst.fname);
-    parse_header(&args->src, args->src.fname);
+    parse_header(&args->dst, args->dst.fname, args->ignore_headers);
+    parse_header(&args->src, args->src.fname, args->ignore_headers);
 
     // -c, core columns
     if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end"; 
@@ -383,50 +415,58 @@ void init_data(args_t *args)
     sanity_check_columns(args->src.fname, &args->src.hdr, args->src.core, &args->src.core_idx, 0);
     sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.core, &args->dst.core_idx, 0);
     if ( args->src.core->n!=3 || args->dst.core->n!=3 ) error("Expected three columns: %s\n", args->core_str);
+    cols_destroy(tmp);
 
     // -m, match columns
     if ( args->match_str )
     {
-        tmp = cols_split(args->match_str, tmp, ':');
+        tmp = cols_split(args->match_str, NULL, ':');
         args->src.match = cols_split(tmp->off[0],NULL,',');
         args->dst.match = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
         sanity_check_columns(args->src.fname, &args->src.hdr, args->src.match, &args->src.match_idx, 0);
         sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.match, &args->dst.match_idx, 0);
         if ( args->src.match->n != args->dst.match->n ) error("Expected equal number of columns: %s\n", args->match_str);
+        cols_destroy(tmp);
     }
 
+    if ( !args->transfer_str && !args->annots_str ) error("Missing the -t, --transfer or the -a, --annotate option\n");
+
     // -t, transfer columns
-    if ( !args->transfer_str ) error("Missing the -t, --transfer option\n");
-    tmp = cols_split(args->transfer_str, tmp, ':');
-    args->src.transfer = cols_split(tmp->off[0],NULL,',');
-    args->dst.transfer = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
-    sanity_check_columns(args->src.fname, &args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
-    sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
-    if ( args->src.transfer->n != args->dst.transfer->n ) error("Expected equal number of columns: %s\n", args->transfer_str);
     int i;
-    for (i=0; i<args->src.transfer->n; i++)
+    if ( args->transfer_str )
     {
-        if ( args->src.transfer_idx[i]==-1 )
+        tmp = cols_split(args->transfer_str, NULL, ':');
+        args->src.transfer = cols_split(tmp->off[0],NULL,',');
+        args->dst.transfer = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
+        sanity_check_columns(args->src.fname, &args->src.hdr, args->src.transfer, &args->src.transfer_idx, 1);
+        sanity_check_columns(args->dst.fname, &args->dst.hdr, args->dst.transfer, &args->dst.transfer_idx, 1);
+        if ( args->src.transfer->n != args->dst.transfer->n ) error("Expected equal number of columns: %s\n", args->transfer_str);
+        for (i=0; i<args->src.transfer->n; i++)
         {
-            cols_append(args->src.hdr.cols,args->src.transfer->off[i]);
-            args->src.transfer_idx[i] = -args->src.hdr.cols->n;    // negative index indicates different ptr location
-            args->src.grow_n++;
+            if ( args->src.transfer_idx[i]==-1 )
+            {
+                cols_append(args->src.hdr.cols,args->src.transfer->off[i]);
+                args->src.transfer_idx[i] = -args->src.hdr.cols->n;    // negative index indicates different ptr location
+                args->src.grow_n++;
+            }
         }
-    }
-    for (i=0; i<args->dst.transfer->n; i++)
-    {
-        if ( args->dst.transfer_idx[i]==-1 )
+        for (i=0; i<args->dst.transfer->n; i++)
         {
-            cols_append(args->dst.hdr.cols,args->dst.transfer->off[i]);
-            args->dst.transfer_idx[i] = args->dst.hdr.cols->n - 1;
-            args->dst.grow_n++;
+            if ( args->dst.transfer_idx[i]==-1 )
+            {
+                cols_append(args->dst.hdr.cols,args->dst.transfer->off[i]);
+                args->dst.transfer_idx[i] = args->dst.hdr.cols->n - 1;
+                args->dst.grow_n++;
+            }
         }
+        args->tmp_cols = (cols_t*)calloc(args->src.transfer->n,sizeof(cols_t));
+        args->tmp_hash = (khash_t(str2int)**)calloc(args->src.transfer->n,sizeof(khash_t(str2int)*));
+        for (i=0; i<args->src.transfer->n; i++)
+            args->tmp_hash[i] = khash_str2int_init();
+        cols_destroy(tmp);
     }
-    args->tmp_cols = (cols_t*)calloc(args->src.transfer->n,sizeof(cols_t));
-    args->tmp_hash = (khash_t(str2int)**)calloc(args->src.transfer->n,sizeof(khash_t(str2int)*));
-    for (i=0; i<args->src.transfer->n; i++)
-        args->tmp_hash[i] = khash_str2int_init();
-    cols_destroy(tmp);
+    else
+        args->src.transfer = calloc(1,sizeof(*args->src.transfer));
 
     // -a, annotation columns
     if ( args->annots_str )
@@ -443,6 +483,7 @@ void init_data(args_t *args)
             else error("The annotation \"%s\" is not recognised\n", args->src.annots->off[i]);
         }
         args->nbp = nbp_init();
+        cols_destroy(tmp);
     }
 
     args->idx = regidx_init(NULL, parse_tab_with_payload,free_payload,sizeof(cols_t),&args->src);
@@ -492,6 +533,27 @@ static inline void write_string(args_t *args, char *str, size_t len)
     if ( len==0 ) len = strlen(str);
     if ( fwrite(str, len, 1, stdout) != 1 ) error("Failed to write %d bytes\n", len);
 }
+static void write_annots(args_t *args)
+{
+    if ( !args->dst.annots ) return;
+
+    args->tmp_kstr.l = 0;
+    int i, len = nbp_length(args->nbp);
+    for (i=0; i<args->dst.annots->n; i++)
+    {
+        if ( args->dst.annots_idx[i]==ANN_NBP ) 
+        {
+            kputc('\t',&args->tmp_kstr);
+            kputw(len,&args->tmp_kstr);
+        }
+        else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
+        {
+            kputc('\t',&args->tmp_kstr);
+            kputd((double)len/(args->nbp->end - args->nbp->beg + 1),&args->tmp_kstr);
+        }
+    }
+    write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
+}
 
 void process_line(args_t *args, char *line, size_t size)
 {
@@ -506,9 +568,12 @@ void process_line(args_t *args, char *line, size_t size)
         return;
     }
 
+    if ( args->nbp ) nbp_reset(args->nbp,beg,end);
+
     if ( !regidx_overlap(args->idx, chr_beg,beg,end, args->itr) )
     {
         write_string(args, line, size);
+        write_annots(args);
         write_string(args, "\n", 1);
         cols_destroy(dst_cols);
         return;
@@ -519,8 +584,6 @@ void process_line(args_t *args, char *line, size_t size)
         args->tmp_cols[i].n = 0;
         kh_clear(str2int, args->tmp_hash[i]);
     }
-
-    if ( args->nbp ) nbp_reset(args->nbp);
 
     int has_overlap = 0;
     while ( regitr_overlap(args->itr) )
@@ -576,6 +639,7 @@ void process_line(args_t *args, char *line, size_t size)
     if ( !has_overlap )
     {
         write_string(args, line, size);
+        write_annots(args);
         write_string(args, "\n", 1);
         cols_destroy(dst_cols);
         return;
@@ -606,27 +670,7 @@ void process_line(args_t *args, char *line, size_t size)
         write_string(args, "\t", 1);
         write_string(args, dst_cols->off[i], 0);
     }
-
-    if ( args->src.annots )
-    {
-        args->tmp_kstr.l = 0;
-        int len = nbp_length(args->nbp);
-        for (i=0; i<args->dst.annots->n; i++)
-        {
-            if ( args->dst.annots_idx[i]==ANN_NBP ) 
-            {
-                kputc('\t',&args->tmp_kstr);
-                kputw(len,&args->tmp_kstr);
-            }
-            else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
-            {
-                kputc('\t',&args->tmp_kstr);
-                kputd((double)len/(end-beg+1),&args->tmp_kstr);
-            }
-        }
-        write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
-    }
-
+    write_annots(args);
     write_string(args, "\n", 1);
     cols_destroy(dst_cols);
 }
@@ -647,6 +691,7 @@ static const char *usage_text(void)
         "                                       nbp  .. number of source base pairs in the overlap\n"
         "   -c, --core src:dst              Core columns [chr,beg,end:chr,beg,end]\n"
         "   -d, --dst-file file             Destination file\n"
+        "   -H, --ignore-headers            Use numeric indexes, ignore the headers completely\n"
         "   -m, --match src:dst             Require match in these columns\n"
         "   -o, --overlap float             Minimum required overlap (non-reciprocal, unless -r is given)\n"
         "   -r, --reciprocal                Require reciprocal overlap\n"
@@ -681,6 +726,7 @@ int main(int argc, char **argv)
         {"annotate",required_argument,NULL,'a'},
         {"core",required_argument,NULL,'c'},
         {"dst-file",required_argument,NULL,'d'},
+        {"ignore-headers",no_argument,NULL,'H'},
         {"match",required_argument,NULL,'m'},
         {"overlap",required_argument,NULL,'o'},
         {"reciprocal",no_argument,NULL,'r'},
@@ -690,12 +736,13 @@ int main(int argc, char **argv)
     };
     char *tmp = NULL;
     int c;
-    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:H",loptions,NULL)) >= 0)
     {
         switch (c) 
         {
             case  0 : args->allow_dups = 1; break;
             case  1 : printf("%s\n",ANNOT_REGS_VERSION); return 0; break;
+            case 'H': args->ignore_headers = 1; break;
             case 'r': args->reciprocal = 1; break;
             case 'c': args->core_str  = optarg; break;
             case 'd': args->dst.fname = optarg; break;
