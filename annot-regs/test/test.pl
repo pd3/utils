@@ -224,5 +224,7 @@ sub test_annot_regs
     my ($opts,%args) = @_;
     my $args  = exists($args{args}) ? $args{args} : '';
     test_cmd($opts,%args,cmd=>"$$opts{bin}/annot-regs $args -s $$opts{path}/$args{src} -d $$opts{path}/$args{dst}");
+    test_cmd($opts,%args,cmd=>"cat $$opts{path}/$args{dst} | $$opts{bin}/annot-regs $args -s $$opts{path}/$args{src}");
+    test_cmd($opts,%args,cmd=>"cat $$opts{path}/$args{src} | $$opts{bin}/annot-regs $args -d $$opts{path}/$args{dst}");
 }
 

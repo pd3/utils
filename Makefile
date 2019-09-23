@@ -24,12 +24,11 @@
 # Edit the location of HTSlib here or run as HTSDIR=/path/to/htslib make
 export HTSDIR = ../htslib
 
-
 TARGETS = annot-regs dist
 
 all:
 	@$(MAKE) libs/version.h; \
-    ln -fs $(HTSDIR) htslib; \
+    rm -f htslib; ln -fs $(HTSDIR) htslib; \
     $(MAKE) -C libs; \
 	for T in $(TARGETS) ; do $(MAKE) -C $$T; done
 

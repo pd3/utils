@@ -53,4 +53,4 @@ dkms.conf
 
 libs/version.h
 htslib
-
+dist/dist
