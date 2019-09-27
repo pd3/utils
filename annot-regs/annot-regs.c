@@ -536,6 +536,7 @@ void destroy_data(args_t *args)
 static inline void write_string(args_t *args, char *str, size_t len)
 {
     if ( len==0 ) len = strlen(str);
+    if ( len==0 ) str = ".", len = 1;
     if ( fwrite(str, len, 1, stdout) != 1 ) error("Failed to write %d bytes\n", len);
 }
 static void write_annots(args_t *args)
