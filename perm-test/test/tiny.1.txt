@@ -1,0 +1,45 @@
+
+
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1.calls.txt -n 1e9
+
+    123456789012345678901
+        bbbbb  tt  bbb
+               cccc
+     .... .... oo.. ....
+      .... .... o... ....
+       .... ...o ....
+        .... ..oo ....
+         .... .oo. ....
+    
+    exact: 5./17 = 0.29411764705882354
+    perm-test:     0.294090135
+    err: 2.7512e-05
+
+
+
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1b.calls.txt -n 1e9
+
+    123456789012345678901
+        bbbbb  tt  bbb
+               c
+        .....  oo  ...
+    
+    exact: 2./10 = 0.2
+    perm-test:     0.2
+    err: 0
+
+
+
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1c.calls.txt -n 1e9
+
+    123456789012345678901
+        bbbbb  tt  bbb
+               cccc
+               c
+    
+    exact: 5./17 * 2./10 = 0.058823529411764705
+    perm-test:             5.999062e-02
+                           5.999589e-02
+    err: 5.27e-06
+
+

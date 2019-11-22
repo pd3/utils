@@ -55,7 +55,7 @@ static const char *usage_text(void)
         "   cat dat.txt | dist -n 3 \n"
         "\n"
         "   # Simple test to demonstrate the usage\n"
-        "   for i in $(seq 1 50); do echo $i; done | ./dist -n 1\n"
+        "   for i in $(seq 1 50); do echo $i; done | dist -n 1\n"
         "\n";
 }
 
