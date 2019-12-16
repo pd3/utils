@@ -1,0 +1,20 @@
+# NITER_ROUNDS:
+#    - number of iterations total
+#    - number of batches
+# TEST_ENR:
+#    - number of iterations
+#    - number of times the simulation had the same or more hits than observed in input data
+#    - P-value derived from the two fields
+# TEST_DPL:
+#    - number of iterations
+#    - number of times the simulation had the same or fewer hits than observed in input data
+#    - P-value derived from the two fields
+# TEST_FOLD:
+#    - number of hits in the input data
+#    - average number of hits in simulations
+#    - average of standard deviations approximated from each batch using the current average estimate
+SEED	1535551081
+NITER_ROUNDS	1.000000e+05	1
+TEST_ENR	100000	44447	4.444700e-01
+TEST_DPL	100000	100000	1.000000e+00
+TEST_FOLD	1	0.444470	0.496907
