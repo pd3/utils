@@ -33,21 +33,34 @@ use Cwd qw/ abs_path /;
 
 my $opts = parse_params();
 test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.1.out',args=>'-ddd');
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.1.out',args=>'-ddd',bed=>1);
 test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.2.out',args=>'-s 1533735605 -n 1e5');
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.2.out',args=>'-s 1533735605 -n 1e5',bed=>1);
 test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.3.out',args=>'-s 1536095034 -n 1e5',calls=>'tiny.1b');
 test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.4.out',args=>'-s 1536663761 -n 1e5',calls=>'tiny.1c');
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.5.out',args=>'-s 1577382113 -n 1e5 --no-bg-overlap');
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.5.out',args=>'-s 1577382113 -n 1e5 --no-bg-overlap',bed=>1);
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.3.out',args=>'-s 1536095034 -n 1e5 --no-bg-overlap',calls=>'tiny.1b');
+test_perm_test($opts,in=>'tiny.1',out=>'tiny.1.6.out',args=>'-s 1536663761 -n 1e5 --no-bg-overlap',calls=>'tiny.1c');
 test_perm_test($opts,in=>'tiny.2',out=>'tiny.2.1.out',args=>'-ddd');
 test_perm_test($opts,in=>'tiny.2',out=>'tiny.2.2.out',args=>'-s 1533906414 -n 1e5');
 test_perm_test($opts,in=>'tiny.2',out=>'tiny.2.3.out',args=>'-s 1533359348 -n 1e5',fai=>'tiny.2b.fai');
+test_perm_test($opts,in=>'tiny.2',out=>'tiny.2.2.out',args=>'-s 1533906414 -n 1e5 --no-bg-overlap');
+test_perm_test($opts,in=>'tiny.2',out=>'tiny.2.3.out',args=>'-s 1533359348 -n 1e5 --no-bg-overlap',fai=>'tiny.2b.fai');
 test_perm_test($opts,in=>'tiny.3',out=>'tiny.3.1.out',args=>'-s 1533602820 -n 1e5');
+test_perm_test($opts,in=>'tiny.3',out=>'tiny.3.1.out',args=>'-s 1533602820 -n 1e5 --no-bg-overlap');
 test_perm_test($opts,in=>'dense.1',out=>'dense.1.1.out',args=>'-ddd');
 test_perm_test($opts,in=>'dense.1',out=>'dense.1.2.out',args=>'-s 1533728182 -n 1e5');
+test_perm_test($opts,in=>'dense.1',out=>'dense.1.3.out',args=>'-s 1577481419 -n 1e5 --no-bg-overlap');
 test_perm_test($opts,in=>'dense.2',out=>'dense.2.1.out',args=>'-ddd');
 test_perm_test($opts,in=>'dense.2',out=>'dense.2.2.out',args=>'-s 1536548501 -n 1e5');
+test_perm_test($opts,in=>'dense.2',out=>'dense.2.3.out',args=>'-s 1577568659 -n 1e5 --no-bg-overlap');
 test_perm_test($opts,in=>'small.1',out=>'small.1.1.out',args=>'-d');
 test_perm_test($opts,in=>'small.1',out=>'small.1.2.out',args=>'-s 1534057607 -n 1e5');
+test_perm_test($opts,in=>'small.1',out=>'small.1.2.out',args=>'-s 1534057607 -n 1e5 --no-bg-overlap');
 test_perm_test($opts,in=>'small.2',out=>'small.2.1.out',args=>'-d');
 test_perm_test($opts,in=>'small.2',out=>'small.2.2.out',args=>'-s 1534105224 -n 1e5');
+test_perm_test($opts,in=>'small.2',out=>'small.2.2.out',args=>'-s 1534105224 -n 1e5 --no-bg-overlap');
 test_perm_test($opts,in=>'small.3',out=>'small.3.1.out',args=>'-d');
 test_perm_test($opts,in=>'small.3',out=>'small.3.2.out',args=>'-s 1533323562 -n 1e5');
 test_perm_test($opts,in=>'boundary.1',out=>'boundary.1.1.out',args=>'-d');
@@ -230,10 +243,11 @@ sub is_file_newer
 sub test_perm_test
 {
     my ($opts,%args) = @_;
+    my $ext   = $args{bed} ? 'bed' : 'txt';
     my $pref  = $args{in};
     my $args  = $args{args};
     my $fai   = exists($args{fai}) ? $args{fai} : "$pref.fai";
-    my $calls = exists($args{calls}) ? "$args{calls}.calls.txt" : "$pref.calls.txt";
-    test_cmd($opts,%args,cmd=>"$$opts{bin}/perm-test -c $$opts{path}/$calls -b $$opts{path}/$pref.bg.txt -t $$opts{path}/$pref.tgt.txt -f $$opts{path}/$fai $args | grep -ve ^CMD -e ^VERSION");
+    my $calls = exists($args{calls}) ? "$args{calls}.calls.$ext" : "$pref.calls.$ext";
+    test_cmd($opts,%args,cmd=>"$$opts{bin}/perm-test -c $$opts{path}/$calls -b $$opts{path}/$pref.bg.$ext -t $$opts{path}/$pref.tgt.$ext -f $$opts{path}/$fai $args | grep -ve ^CMD -e ^VERSION");
 }
 

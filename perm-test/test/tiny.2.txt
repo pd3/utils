@@ -1,0 +1,34 @@
+
+perm-test -t test/tiny.2.tgt.txt -b test/tiny.2.bg.txt -f test/tiny.2.fai -c test/tiny.2.calls.txt -n 1e9
+perm-test -t test/tiny.2.tgt.txt -b test/tiny.2.bg.txt -f test/tiny.2.fai -c test/tiny.2.calls.txt -n 1e9 --no-bg-overlap
+
+             10        20        30        40
+    1234567890123456789012345678901234567890123456
+        bbb     ttt     bbb      ttt     bbbb
+                 cccc
+     .... .... .ooo      .... ...o o... ....
+      ....      ooo. .... .... ..oo      ....
+       ....      oo.. ....      .ooo      ....
+        .... ...o o... ....      ooo. .... ....
+         .... ..oo      ....      oo.. .... ....
+
+    exact: 12./31 = 0.3870967741935484
+    perm-test:      0.3871045
+    err: 7.7258e-06
+
+
+
+perm-test -t test/tiny.2.tgt.txt -b test/tiny.2.bg.txt -f test/tiny.2b.fai -c test/tiny.2.calls.txt -n 1e9
+perm-test -t test/tiny.2.tgt.txt -b test/tiny.2.bg.txt -f test/tiny.2b.fai -c test/tiny.2.calls.txt -n 1e9 --no-bg-overlap
+
+             10        20        30        40
+    12345678901234567890123456789012345678901
+        bbb     ttt     bbb      ttt     bbbb
+                 cccc
+
+    exact: 12./28 = 0.42857142857142855
+    perm-test:      0.4285679
+    err:  3.52857e-06
+
+
+

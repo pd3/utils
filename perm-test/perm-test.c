@@ -74,7 +74,8 @@ typedef struct
     uint32_t amax;  // the maximum coordinate on achrom before the call goes beyond the end
     reg_t *regs;    // list of spliced and merged regions
     uint32_t nregs;
-    regidx_t *idx;  // index to the artificial chrom
+    regidx_t *tgt_idx;  // index to the artificial chrom
+    regidx_t *bg_idx;   // for the --hit-no-bg option
 }
 chr_t;
 
@@ -90,7 +91,7 @@ typedef struct
     uint32_t niter, nrounds;    // number of iterations to run and the number of rounds
     regidx_t *tgt_idx, *bg_idx;
     regitr_t *tgt_itr, *bg_itr;
-    int debug;
+    int debug, hit_no_bg;
     FILE *out_fh;
 }
 args_t;
@@ -200,6 +201,15 @@ void merge_and_splice_regions(args_t *args, chr_t *chr)
     }
 }
 
+int is_bed_file(const char *fname)
+{
+    int len = strlen(fname);
+    if ( len>=7 && !strcasecmp(".bed.gz",fname+len-7) ) return 1; 
+    else if ( len>=8 && !strcasecmp(".bed.bgz",fname+len-8) ) return 1;
+    else if ( len>=4 && !strcasecmp(".bed",fname+len-4) ) return 1;
+    return 0;
+}
+
 // this is to sort the calls by size
 static int uint32t_cmp(const void *aptr, const void *bptr)
 {
@@ -276,6 +286,7 @@ void init_data(args_t *args)
         if ( !args->chr[i].len ) error("Could not determine the length of \"%s\" from %s\n",args->chr[i].name,args->ref_fai_fname);
 
     // read calls
+    int is_bed = is_bed_file(args->calls_fname);
     fp = hts_open(args->calls_fname,"r");
     if ( !fp ) error("Failed to read: %s\n", args->calls_fname);
     while ( hts_getline(fp, KS_SEP_LINE, &str) > 0 )
@@ -284,6 +295,7 @@ void init_data(args_t *args)
         uint32_t beg, end;
         int ret = regidx_parse_tab(str.s, &chr_beg, &chr_end, &beg, &end, NULL, NULL);
         if ( ret < -1 ) error("Could not parse %s: %s\n", args->calls_fname, str.s);
+        if ( is_bed ) beg++;
         chr_end[1] = 0;
 
         // Check if the call overlaps a bg or tgt region
@@ -317,7 +329,8 @@ void destroy_data(args_t *args)
         chr_t *chr = &args->chr[i];
         free(chr->name);
         free(chr->regs);
-        if ( chr->idx ) regidx_destroy(chr->idx);
+        if ( chr->tgt_idx ) regidx_destroy(chr->tgt_idx);
+        if ( chr->bg_idx ) regidx_destroy(chr->bg_idx);
     }
     free(args->chr);
     free(args->niter_hits);
@@ -345,12 +358,19 @@ static inline void update_alen_amax(chr_t *chr, uint32_t reg_len, uint32_t reg_b
 }
 void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
 {
+    if ( call_len <=0 ) error("Error: call length %d??\n", call_len);
+
     chr->amax = 0;
     chr->alen = 0;
     chr->clen = call_len;
 
-    if ( chr->idx ) regidx_destroy(chr->idx);
-    chr->idx = regidx_init(NULL,NULL,NULL,0,NULL);
+    if ( chr->tgt_idx ) regidx_destroy(chr->tgt_idx);
+    chr->tgt_idx = regidx_init(NULL,NULL,NULL,0,NULL);
+    if ( args->hit_no_bg )
+    {
+        if ( chr->bg_idx ) regidx_destroy(chr->bg_idx);
+        chr->bg_idx = regidx_init(NULL,NULL,NULL,0,NULL);
+    }
 
     uint32_t i, rep_end1 = 0, clen1 = call_len - 1;
     char *chr_name_end = chr->name + strlen(chr->name) - 1;
@@ -363,7 +383,9 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
                 fprintf(args->out_fh, "L%d_%s\t%s\t%d\t%d\t..\t%d\t%d\n", call_len, chr->regs[i].is_tgt ? "TGT" : "BG", chr->name, chr->regs[i].beg+1, chr->regs[i].beg + chr->regs[i].len, chr->alen + 1, chr->alen + chr->regs[i].len);
 
             if ( chr->regs[i].is_tgt )
-                regidx_push(chr->idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+            else if ( args->hit_no_bg )
+                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
 
             chr->alen += chr->regs[i].len;
         }
@@ -383,7 +405,9 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
                 fprintf(args->out_fh,"L%d_%s\t%s\t%d\t%d\t..\t%d\t%d\n", call_len, chr->regs[i].is_tgt ? "TGT" : "BG", chr->name, chr->regs[i].beg+1, chr->regs[i].beg + chr->regs[i].len, chr->alen + 1, chr->alen + chr->regs[i].len);
 
             if ( chr->regs[i].is_tgt )
-                regidx_push(chr->idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+            else if ( args->hit_no_bg )
+                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
 
             update_alen_amax(chr, chr->regs[i].len, chr->regs[i].beg);
             rep_end1 = chr->regs[i].beg + chr->regs[i].len;
@@ -405,15 +429,21 @@ void run_test(args_t *args, uint32_t call_len)
         if ( chr->len <= call_len )
         {
             if ( args->debug > 3 ) fprintf(args->out_fh, "RAND\t%s\t%u\t%u\n", chr->name,1,chr->len);
-            if ( regidx_overlap(args->tgt_idx,chr->name,0,chr->len,NULL) ) args->niter_hits[i]++;
+            if ( regidx_overlap(args->tgt_idx,chr->name,0,chr->len,NULL) )
+            {
+                if ( !args->hit_no_bg || !regidx_overlap(chr->bg_idx,chr->name,0,chr->len,NULL) ) args->niter_hits[i]++;
+            }
             continue;
         }
 
-        if ( !chr->idx || chr->clen!=call_len ) init_chr(args, chr, call_len);
+        if ( !chr->tgt_idx || chr->clen!=call_len ) init_chr(args, chr, call_len);
 
         uint32_t pos = (double)random()/((double)RAND_MAX+1) * (chr->amax + 1);
         if ( args->debug > 3 ) fprintf(args->out_fh, "RAND\t%s\t%u\t%u\n", chr->name,chr->amax+1,pos+1);
-        if ( regidx_overlap(chr->idx, chr->name, pos, pos + call_len - 1, NULL) ) args->niter_hits[i]++;
+        if ( regidx_overlap(chr->tgt_idx, chr->name, pos, pos + call_len - 1, NULL) )
+        {
+            if ( !args->hit_no_bg || !regidx_overlap(chr->bg_idx,chr->name,pos,pos+call_len-1,NULL) ) args->niter_hits[i]++;
+        }
     }
 }
 
@@ -427,19 +457,34 @@ static void usage(void)
         "\n"
         "About: Run enrichment (permutation) test. It is efficient, does not attempt to place calls\n"
         "       in inaccessible regions, and correctly handles calls and regions of different sizes.\n"
+        "       All coordinates are 1-based, inclusive, unless the file names have \".bed\", \".bed.gz\"\n"
+        "       or \".bed.bgz\" extension.\n"
         "Usage: perm-test [OPTIONS]\n"
         "Options:\n"
         "   -b, --background-regs FILE      Background regions, expected not to be enriched: chr,beg,end\n"
         "   -c, --calls FILE                Calls: chr,beg,end\n"
         "   -d, --debug-regions             Print the spliced regions (and stop)\n"
         "   -f, --ref-fai FILE              Chromosome lengths, given for example as fai index: chr,length\n"
+        "       --no-bg-overlap             Permuted variants must not overlap background regions\n"
         "   -o, --output FILE               Place output in FILE\n"
         "   -m, --max-call-length INT       Skip big calls [10e6]\n"
         "   -n, --niter NUM1[,NUM2]         Number of iterations: total (NUM1) and per-batch (NUM2, reduces memory)\n"
         "   -s, --random-seed INT           Random seed\n"
         "   -t, --target-regs FILE          Target regions, expected to be enriched: chr,beg,end\n"
-        "Example:\n"
-        "   perm-test -b bg.txt -t tgt.txt -c calls.txt -f ref.fai -n 1e9,1e8\n"
+        "\n"
+        "Examples:\n"
+        "   # Take a set of \"background\" regions (e.g. exome baits), \"target\" regions (e.g. a set of genes)\n"
+        "   # and calculate how likely it is for a set of calls (e.g. CNVs) to overlap the target regions given\n"
+        "   # the accessible background+target regions. The program ensures that overlapping and duplicate\n"
+        "   # regions are handled correctly.\n"
+        "   perm-test -b baits.txt -t genes.txt -c calls.txt -f ref.fai -n 1e9,1e8\n"
+        "\n"
+        "   # Same as above but this time count only permuted variants that overlap target regions but do not\n"
+        "   # overlap any background region (e.g. CNVs that hit only a non-coding region but not a coding sequence).\n"
+        "   # Note that target regions take precedence over background regions in case the sets overlap. If that is\n"
+        "   # not desired, use `bedtools subtract -a noncoding.bed -b coding.bed` to clip and write regions from\n"
+        "   # file A not present in B.\n"
+        "   perm-test -b coding.bed -t noncoding.bed -c calls.txt -f ref.fai -n 1e9,1e8 --no-bg-overlap\n"
         "\n",
         PERM_TEST_VERSION
         );
@@ -452,6 +497,7 @@ int main(int argc, char **argv)
     args->max_call_len = 10e6;
     static struct option loptions[] =
     {
+        {"no-bg-overlap",no_argument,NULL,1},
         {"max-call-len",required_argument,NULL,'m'},
         {"ref-fai",required_argument,NULL,'f'},
         {"output",required_argument,NULL,'o'},
@@ -469,6 +515,7 @@ int main(int argc, char **argv)
     {
         switch (c) 
         {
+            case  1 : args->hit_no_bg = 1; break;
             case 'm': 
                 args->max_call_len = strtod(optarg, &tmp); 
                 if ( tmp==optarg || *tmp ) error("Could not parse --max-call-length %s\n", optarg);

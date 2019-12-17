@@ -1,0 +1,39 @@
+
+perm-test -t test/dense.2.tgt.txt -b test/dense.2.bg.txt -f test/dense.2.fai -c test/dense.2.calls.txt -n 1e9
+
+             10        20        30        40        50
+    12345678901234567890123456789012345678901234567890123456
+       bbb bbbb bbb           bbb              bbbb      bbb
+
+    12345678901234567890123456789012345678901234567890123456
+       bbb bbbb bbb           bbb              bbbb      bbb
+
+    12345678901234567890123456789012345678901234567890123456
+       bbb bbbb bbb           bbb              bbbb      bbb
+
+    12345678901234567890123456789012345678901234567890123456
+       bbb bbbb bbb           bbb              bbbb      bbb
+
+    12345678901234567890123456789012345678901234567890123456
+       bbb bbbb bbb     ttt   bbb   ttt ttt    bbbb tttt bbb
+                    ccccccc
+    ....... ....... ....ooo ....... ooo.ooo ....... xxxx...
+     ....... ....... ...ooo. ....... oo.ooo. ....... xxx....
+      ....... ....... ..ooo.. ......x ..ooo.. ......x
+       ....... ....... .ooo... .....xx .ooo... .....xx
+        ....... ....... xxx.... ....xx. ooo.... ....xxx
+         ....... ....... xx..... ...ooo. xx..... ...xxxx
+          ....... ......x x...... ..ooo.o x...... ..xxxx.
+           ....... .....oo ....... .ooo.oo ....... .xxxx..
+
+    exact: 30./(5*50) = 0.12
+    perm-test:          0.120015051
+    err:   1.5e-05
+
+perm-test -t test/dense.2.tgt.txt -b test/dense.2.bg.txt -f test/dense.2.fai -c test/dense.2.calls.txt -n 1e9 --no-bg-overlap
+
+    exact: 13./(5*50) = 0.052
+    perm-test:      0.052001216
+    err:   1.216e-06
+
+

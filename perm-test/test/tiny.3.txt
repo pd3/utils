@@ -1,0 +1,18 @@
+
+perm-test -t test/tiny.3.tgt.txt -b test/tiny.3.bg.txt -f test/tiny.3.fai -c test/tiny.3.calls.txt -n 1e9
+
+             10        20        30
+    12345678901234567890123456789012345678
+     bbb     ttt     bbb      ttt     bbbb
+              cccc
+    ....  ...o o...   .... ...o o... 
+     ....  ..oo   .... .... ..oo   ....
+      ....  .ooo   ....      .ooo   ....
+       ....  ooo.   ....      ooo.   ....
+              oo..   ....      oo..   ....
+
+
+    exact: 12./26 = 0.4615384615
+    perm-test:      0.461533186
+    err:    5.2755e-06
+

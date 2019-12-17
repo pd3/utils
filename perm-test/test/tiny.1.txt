@@ -1,6 +1,7 @@
 
 
 perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1.calls.txt -n 1e9
+perm-test -t test/tiny.1.tgt.bed -b test/tiny.1.bg.bed -f test/tiny.1.fai -c test/tiny.1.calls.bed -n 1e9
 
     123456789012345678901
         bbbbb  tt  bbb
@@ -16,8 +17,24 @@ perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c tes
     err: 2.7512e-05
 
 
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1.calls.txt -n 1e9 --no-bg-overlap
+
+    123456789012345678901
+        bbbbb  tt  bbb
+               cccc
+     .... .... oo.. ....
+      .... .... x... ....
+       .... ...x ....
+        .... ..oo ....
+         .... .oo. ....
+    
+    exact: 3./17 = 0.17647058823529413
+    perm-test:     0.1764850
+    err: 1.441e-05
+
 
 perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1b.calls.txt -n 1e9
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1b.calls.txt -n 1e9 --no-bg-overlap
 
     123456789012345678901
         bbbbb  tt  bbb
@@ -39,7 +56,12 @@ perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c tes
     
     exact: 5./17 * 2./10 = 0.058823529411764705
     perm-test:             5.999062e-02
-                           5.999589e-02
     err: 5.27e-06
+
+perm-test -t test/tiny.1.tgt.txt -b test/tiny.1.bg.txt -f test/tiny.1.fai -c test/tiny.1c.calls.txt -n 1e9 --no-bg-overlap
+
+    exact: 3./17 * 2./10 = 0.03529411764705882
+    perm-test:             0.03529223
+    err: 1.8876e-06
 
 
