@@ -482,8 +482,8 @@ static void usage(void)
         "   # Same as above but this time count only permuted variants that overlap target regions but do not\n"
         "   # overlap any background region (e.g. CNVs that hit only a non-coding region but not a coding sequence).\n"
         "   # Note that target regions take precedence over background regions in case the sets overlap. If that is\n"
-        "   # not desired, use `bedtools subtract -a noncoding.bed -b coding.bed` to clip and write regions from\n"
-        "   # file A not present in B.\n"
+        "   # not desired, use `bedtools subtract -a A.bed -b B.bed` to clip and write regions from file A not present\n"
+        "   # in B (e.g. `bedtools substract -a baits.bed -b coding.bed > noncoding.bed`).\n"
         "   perm-test -b coding.bed -t noncoding.bed -c calls.txt -f ref.fai -n 1e9,1e8 --no-bg-overlap\n"
         "\n",
         PERM_TEST_VERSION
