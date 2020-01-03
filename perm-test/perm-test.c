@@ -57,7 +57,7 @@
 #include <htslib/kstring.h>
 #include <htslib/kseq.h>
 #include <getopt.h>
-#include "version.h"
+#include "../libs/version.h"
 
 typedef struct
 {
@@ -486,7 +486,7 @@ static void usage(void)
         "   # in B (e.g. `bedtools substract -a baits.bed -b coding.bed > noncoding.bed`).\n"
         "   perm-test -b coding.bed -t noncoding.bed -c calls.txt -f ref.fai -n 1e9,1e8 --no-bg-overlap\n"
         "\n",
-        PERM_TEST_VERSION
+        UTILS_VERSION
         );
 }
 
@@ -580,7 +580,7 @@ int main(int argc, char **argv)
         fprintf(args->out_fh, "#    - number of hits in the input data\n");
         fprintf(args->out_fh, "#    - average number of hits in simulations\n");
         fprintf(args->out_fh, "#    - average of standard deviations approximated from each batch using the current average estimate\n");
-        fprintf(args->out_fh, "VERSION\t%s\n",PERM_TEST_VERSION);
+        fprintf(args->out_fh, "VERSION\t%s\n",UTILS_VERSION);
         fprintf(args->out_fh, "CMD\t%s",argv[0]); for (c=1; c<argc; c++) fprintf(args->out_fh, " %s", argv[c]); fprintf(args->out_fh, "\n");
         fprintf(args->out_fh, "SEED\t%d\n", seed);
         fprintf(args->out_fh, "NITER_ROUNDS\t%e\t%u\n", (double)args->niter,args->nrounds);
