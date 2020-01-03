@@ -53,6 +53,7 @@
 #include <assert.h>
 #include <regidx.h>
 #include <htslib/hts.h>
+#include <htslib/bgzf.h>
 #include <htslib/khash_str2int.h>
 #include <htslib/kstring.h>
 #include <htslib/kseq.h>
@@ -261,10 +262,10 @@ void init_data(args_t *args)
         merge_and_splice_regions(args, &args->chr[i]);
 
     // read chromosome lengths
-    htsFile *fp = hts_open(args->ref_fai_fname,"r");
+    BGZF *fp = bgzf_open(args->ref_fai_fname,"r");
     if ( !fp ) error("Failed to read: %s\n", args->ref_fai_fname);
     kstring_t str = {0,0,0};
-    while ( hts_getline(fp, KS_SEP_LINE, &str) > 0 )
+    while ( bgzf_getline(fp, '\n', &str) > 0 )
     {
         char keep, *tmp, *ptr = str.s;
         while ( *ptr && !isspace(*ptr) ) ptr++;
@@ -279,7 +280,7 @@ void init_data(args_t *args)
         chr->len = strtol(ptr, &tmp, 10);
         if ( tmp==ptr ) error("Could not parse %s: %s\n", args->ref_fai_fname,str.s);
     }
-    if ( hts_close(fp)!=0 ) error("close failed: %s\n", args->ref_fai_fname);
+    if ( bgzf_close(fp)!=0 ) error("close failed: %s\n", args->ref_fai_fname);
     khash_str2int_destroy(chr_hash);
 
     for (i=0; i<args->nchr; i++)
@@ -287,9 +288,9 @@ void init_data(args_t *args)
 
     // read calls
     int is_bed = is_bed_file(args->calls_fname);
-    fp = hts_open(args->calls_fname,"r");
+    fp = bgzf_open(args->calls_fname,"r");
     if ( !fp ) error("Failed to read: %s\n", args->calls_fname);
-    while ( hts_getline(fp, KS_SEP_LINE, &str) > 0 )
+    while ( bgzf_getline(fp, '\n', &str) > 0 )
     {
         char *chr_beg, *chr_end;
         uint32_t beg, end;
@@ -315,7 +316,7 @@ void init_data(args_t *args)
         if ( !args->calls ) error("Could not alloc %zu bytes\n", sizeof(*args->calls)*args->ncalls);
         args->calls[args->ncalls-1] = end - beg + 1;
     }
-    if ( hts_close(fp)!=0 ) error("close failed: %s\n", args->calls_fname);
+    if ( bgzf_close(fp)!=0 ) error("close failed: %s\n", args->calls_fname);
     free(str.s);
 
     if ( !args->ncalls && !args->debug ) error("Error: none of the calls intersects the tgt or bg regions\n");
