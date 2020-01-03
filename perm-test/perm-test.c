@@ -1,5 +1,5 @@
 /* 
-    Copyright (C) 2018 Genome Research Ltd.
+    Copyright (C) 2018-2020 Genome Research Ltd.
     
     Author: Petr Danecek <pd3@sanger.ac.uk>
     
@@ -306,7 +306,7 @@ void init_data(args_t *args)
             if ( args->debug ) fprintf(args->out_fh, "CALL\tSKIP\t%s\t%d\t%d\n", chr_beg,beg+1,end+1);
             continue;
         }
-        if ( is_tgt ) args->nobs_tgt_hits++;
+        if ( is_tgt && (!args->hit_no_bg || !is_bg) ) args->nobs_tgt_hits++;
         if ( args->debug )
             fprintf(args->out_fh, "CALL\t%s\t%s\t%d\t%d\n",is_tgt && is_bg ? "TGT_BG" : ( is_tgt ? "TGT" : "BG"),chr_beg,beg+1,end+1);
 
