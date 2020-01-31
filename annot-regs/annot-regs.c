@@ -39,7 +39,7 @@
 
 typedef struct
 {
-    int n,m;
+    uint32_t n,m;
     char **off, *rmme;
 }
 cols_t;
