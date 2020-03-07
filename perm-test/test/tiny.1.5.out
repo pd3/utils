@@ -13,8 +13,13 @@
 #    - number of hits in the input data
 #    - average number of hits in simulations
 #    - average of standard deviations approximated from each batch using the current average estimate
+# DIST:
+#    - number of hits in a simulation
+#    - number of simulations with this many hits
 SEED	1577382113
 NITER_ROUNDS	1.000000e+05	1
 TEST_ENR	100000	17526	1.752600e-01
 TEST_DPL	100000	100000	1.000000e+00
 TEST_FOLD	1	0.175260	0.380189
+DIST	0	82474
+DIST	1	17526

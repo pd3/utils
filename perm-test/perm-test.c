@@ -60,6 +60,8 @@
 #include <getopt.h>
 #include "../libs/version.h"
 
+KHASH_MAP_INIT_INT(int2int, int)
+
 typedef struct
 {
     uint32_t beg, len:31, is_tgt:1;
@@ -581,17 +583,21 @@ int main(int argc, char **argv)
         fprintf(args->out_fh, "#    - number of hits in the input data\n");
         fprintf(args->out_fh, "#    - average number of hits in simulations\n");
         fprintf(args->out_fh, "#    - average of standard deviations approximated from each batch using the current average estimate\n");
+        fprintf(args->out_fh, "# DIST:\n");
+        fprintf(args->out_fh, "#    - number of hits in a simulation\n");
+        fprintf(args->out_fh, "#    - number of simulations with this many hits\n");
         fprintf(args->out_fh, "VERSION\t%s\n",UTILS_VERSION);
         fprintf(args->out_fh, "CMD\t%s",argv[0]); for (c=1; c<argc; c++) fprintf(args->out_fh, " %s", argv[c]); fprintf(args->out_fh, "\n");
         fprintf(args->out_fh, "SEED\t%d\n", seed);
         fprintf(args->out_fh, "NITER_ROUNDS\t%e\t%u\n", (double)args->niter,args->nrounds);
     }
-    srand(seed);
+    srandom(seed);
 
     init_data(args);
 
     if ( args->debug!=1 )
     {
+        khash_t(int2int) *dist_hash = kh_init(int2int);
         double navg_tgt_hits = 0, dev = 0;
         uint64_t nexc = 0, nfew = 0, ntot = 0;
         uint32_t i,j;
@@ -614,6 +620,20 @@ int main(int argc, char **argv)
             double avg = navg_tgt_hits/ntot;
             for (i=0; i<args->niter; i++)
                 dev += (args->niter_hits[i] - avg)*(args->niter_hits[i] - avg);
+
+            for (i=0; i<args->niter; i++)
+            {
+                int key = args->niter_hits[i];
+                khint_t k = kh_get(int2int, dist_hash, key);
+                if ( k == kh_end(dist_hash) )
+                {
+                    int ret;
+                    k = kh_put(int2int, dist_hash, key, &ret);
+                    assert(ret>0);
+                    kh_val(dist_hash, k) = 0;
+                }
+                kh_val(dist_hash, k)++;
+            }
         }
         if ( ntot )
         {
@@ -622,7 +642,10 @@ int main(int argc, char **argv)
             fprintf(args->out_fh, "TEST_ENR\t%"PRIu64"\t%"PRIu64"\t%s%e\n", ntot,nexc,nexc?"":"<",pval_enr);
             fprintf(args->out_fh, "TEST_DPL\t%"PRIu64"\t%"PRIu64"\t%s%e\n", ntot,nfew,nfew?"":"<",pval_dpl);
             fprintf(args->out_fh, "TEST_FOLD\t%"PRIu32"\t%f\t%f\n", args->nobs_tgt_hits,navg_tgt_hits/ntot,sqrt(dev/ntot));
+            for (i=0; i<kh_end(dist_hash); i++)
+                if ( kh_exist(dist_hash,i) ) fprintf(args->out_fh, "DIST\t%d\t%d\n",kh_key(dist_hash,i),kh_val(dist_hash,i));
         }
+        kh_destroy(int2int, dist_hash);
     }
 
     destroy_data(args);
