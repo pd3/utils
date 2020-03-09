@@ -94,7 +94,7 @@ typedef struct
     uint32_t niter, nrounds;    // number of iterations to run and the number of rounds
     regidx_t *tgt_idx, *bg_idx;
     regitr_t *tgt_itr, *bg_itr;
-    int debug, hit_no_bg;
+    int debug, hit_no_bg, print_placements;
     FILE *out_fh;
 }
 args_t;
@@ -367,12 +367,14 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
     chr->alen = 0;
     chr->clen = call_len;
 
+    size_t payload_size = args->print_placements ? sizeof(uint32_t) : 0;
+
     if ( chr->tgt_idx ) regidx_destroy(chr->tgt_idx);
-    chr->tgt_idx = regidx_init(NULL,NULL,NULL,0,NULL);
-    if ( args->hit_no_bg )
+    chr->tgt_idx = regidx_init(NULL,NULL,NULL,payload_size,NULL);
+    if ( args->hit_no_bg || args->print_placements )
     {
         if ( chr->bg_idx ) regidx_destroy(chr->bg_idx);
-        chr->bg_idx = regidx_init(NULL,NULL,NULL,0,NULL);
+        chr->bg_idx = regidx_init(NULL,NULL,NULL,payload_size,NULL);
     }
 
     uint32_t i, rep_end1 = 0, clen1 = call_len - 1;
@@ -385,10 +387,12 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
             if ( args->debug > 1 )
                 fprintf(args->out_fh, "L%d_%s\t%s\t%d\t%d\t..\t%d\t%d\n", call_len, chr->regs[i].is_tgt ? "TGT" : "BG", chr->name, chr->regs[i].beg+1, chr->regs[i].beg + chr->regs[i].len, chr->alen + 1, chr->alen + chr->regs[i].len);
 
+            void *payload = args->print_placements ? &chr->regs[i].beg : NULL;
+
             if ( chr->regs[i].is_tgt )
-                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
-            else if ( args->hit_no_bg )
-                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
+            else if ( args->hit_no_bg || args->print_placements )
+                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
 
             chr->alen += chr->regs[i].len;
         }
@@ -407,10 +411,12 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
             if ( args->debug > 2 )
                 fprintf(args->out_fh,"L%d_%s\t%s\t%d\t%d\t..\t%d\t%d\n", call_len, chr->regs[i].is_tgt ? "TGT" : "BG", chr->name, chr->regs[i].beg+1, chr->regs[i].beg + chr->regs[i].len, chr->alen + 1, chr->alen + chr->regs[i].len);
 
+            void *payload = args->print_placements ? &chr->regs[i].beg : NULL;
+
             if ( chr->regs[i].is_tgt )
-                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+                regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
             else if ( args->hit_no_bg )
-                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, NULL);
+                regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
 
             update_alen_amax(chr, chr->regs[i].len, chr->regs[i].beg);
             rep_end1 = chr->regs[i].beg + chr->regs[i].len;
@@ -422,6 +428,9 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
 }
 void run_test(args_t *args, uint32_t call_len)
 {
+    regitr_t *tgt_itr = args->print_placements ? args->tgt_itr : NULL;
+    regitr_t *bg_itr  = args->print_placements ? args->bg_itr  : NULL;
+
     int i;
     for (i=0; i<args->niter; i++)
     {
@@ -432,10 +441,14 @@ void run_test(args_t *args, uint32_t call_len)
         if ( chr->len <= call_len )
         {
             if ( args->debug > 3 ) fprintf(args->out_fh, "RAND\t%s\t%u\t%u\n", chr->name,1,chr->len);
-            if ( regidx_overlap(args->tgt_idx,chr->name,0,chr->len,NULL) )
+            if ( regidx_overlap(args->tgt_idx,chr->name,0,chr->len,tgt_itr) )
             {
+                if ( args->print_placements && regitr_overlap(tgt_itr) )
+                    fprintf(args->out_fh, "POS\t%s\t%d\t%d\t1\n", chr->name,1,call_len);
                 if ( !args->hit_no_bg || !regidx_overlap(chr->bg_idx,chr->name,0,chr->len,NULL) ) args->niter_hits[i]++;
             }
+            else if ( args->print_placements && regidx_overlap(args->bg_idx,chr->name,0,chr->len,bg_itr) && regitr_overlap(bg_itr) )
+                fprintf(args->out_fh, "POS\t%s\t%d\t%d\t0\n", chr->name,1,call_len);
             continue;
         }
 
@@ -443,9 +456,19 @@ void run_test(args_t *args, uint32_t call_len)
 
         uint32_t pos = (double)random()/((double)RAND_MAX+1) * (chr->amax + 1);
         if ( args->debug > 3 ) fprintf(args->out_fh, "RAND\t%s\t%u\t%u\n", chr->name,chr->amax+1,pos+1);
-        if ( regidx_overlap(chr->tgt_idx, chr->name, pos, pos + call_len - 1, NULL) )
+        if ( regidx_overlap(chr->tgt_idx, chr->name, pos, pos + call_len - 1, tgt_itr) )
         {
+            if ( args->print_placements && regitr_overlap(tgt_itr) )
+            {
+                uint32_t ori_pos = regitr_payload(tgt_itr,uint32_t) - tgt_itr->beg + pos + 1;
+                fprintf(args->out_fh, "POS\t%s\t%d\t%d\t1\n", chr->name,ori_pos,ori_pos+call_len-1);
+            }
             if ( !args->hit_no_bg || !regidx_overlap(chr->bg_idx,chr->name,pos,pos+call_len-1,NULL) ) args->niter_hits[i]++;
+        }
+        else if ( args->print_placements && regidx_overlap(chr->bg_idx,chr->name,pos,pos+call_len-1,bg_itr) && regitr_overlap(bg_itr) )
+        {
+            uint32_t ori_pos = regitr_payload(bg_itr,uint32_t) - bg_itr->beg + pos + 1;
+            fprintf(args->out_fh, "POS\t%s\t%d\t%d\t0\n", chr->name,ori_pos,ori_pos+call_len-1);
         }
     }
 }
@@ -468,15 +491,16 @@ static void usage(void)
         "   -c, --calls FILE                Calls: chr,beg,end\n"
         "   -d, --debug-regions             Print the spliced regions (and stop)\n"
         "   -f, --ref-fai FILE              Chromosome lengths, given for example as fai index: chr,length\n"
-        "       --no-bg-overlap             Permuted variants must not overlap background regions\n"
-        "   -o, --output FILE               Place output in FILE\n"
         "   -m, --max-call-length INT       Skip big calls [10e6]\n"
         "   -n, --niter NUM1[,NUM2]         Number of iterations: total (NUM1) and per-batch (NUM2, reduces memory)\n"
+        "       --no-bg-overlap             Permuted variants must not overlap background regions\n"
+        "   -o, --output FILE               Place output in FILE\n"
+        "   -p, --print-placements          Print all random placements\n"
         "   -s, --random-seed INT           Random seed\n"
         "   -t, --target-regs FILE          Target regions, expected to be enriched: chr,beg,end\n"
         "\n"
         "Examples:\n"
-        "   # Take a set of \"background\" regions (e.g. exome baits), \"target\" regions (e.g. a set of genes)\n"
+        "   # Take a set of \"background\" regions (e.g. exome baits), \"target\" regions (e.g. selected genes)\n"
         "   # and calculate how likely it is for a set of calls (e.g. CNVs) to overlap the target regions given\n"
         "   # the accessible background+target regions. The program ensures that overlapping and duplicate\n"
         "   # regions are handled correctly.\n"
@@ -500,6 +524,7 @@ int main(int argc, char **argv)
     args->max_call_len = 10e6;
     static struct option loptions[] =
     {
+        {"print-placements",no_argument,NULL,'p'},
         {"no-bg-overlap",no_argument,NULL,1},
         {"max-call-len",required_argument,NULL,'m'},
         {"ref-fai",required_argument,NULL,'f'},
@@ -514,11 +539,12 @@ int main(int argc, char **argv)
     };
     char *tmp = NULL;
     int c, seed = -1;
-    while ((c = getopt_long(argc, argv, "?hc:b:t:n:ds:f:o:m:",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "?hc:b:t:n:ds:f:o:m:p",loptions,NULL)) >= 0)
     {
         switch (c) 
         {
             case  1 : args->hit_no_bg = 1; break;
+            case 'p': args->print_placements = 1; break;
             case 'm': 
                 args->max_call_len = strtod(optarg, &tmp); 
                 if ( tmp==optarg || *tmp ) error("Could not parse --max-call-length %s\n", optarg);
