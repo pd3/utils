@@ -415,7 +415,7 @@ void init_chr(args_t *args, chr_t *chr, uint32_t call_len)
 
             if ( chr->regs[i].is_tgt )
                 regidx_push(chr->tgt_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
-            else if ( args->hit_no_bg )
+            else if ( args->hit_no_bg || args->print_placements )
                 regidx_push(chr->bg_idx, chr->name, chr_name_end, chr->alen, chr->alen + chr->regs[i].len - 1, payload);
 
             update_alen_amax(chr, chr->regs[i].len, chr->regs[i].beg);
