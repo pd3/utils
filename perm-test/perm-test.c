@@ -321,7 +321,8 @@ void init_data(args_t *args)
     if ( bgzf_close(fp)!=0 ) error("close failed: %s\n", args->calls_fname);
     free(str.s);
 
-    if ( !args->ncalls && !args->debug ) error("Error: none of the calls intersects the tgt or bg regions\n");
+    if ( !args->ncalls && !args->debug )
+        error("Error: none of the calls intersects the tgt or bg regions (calls larger than `-m %d` were excluded)\n", args->max_call_len);
     qsort(args->calls, args->ncalls, sizeof(*args->calls), uint32t_cmp);
 }
 void destroy_data(args_t *args)
