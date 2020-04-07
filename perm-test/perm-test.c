@@ -286,7 +286,15 @@ void init_data(args_t *args)
     khash_str2int_destroy(chr_hash);
 
     for (i=0; i<args->nchr; i++)
-        if ( !args->chr[i].len ) error("Could not determine the length of \"%s\" from %s\n",args->chr[i].name,args->ref_fai_fname);
+    {
+        if ( args->chr[i].len ) continue;
+        fprintf(stderr,"Warning: Skipping the sequence \"%s\" because it is not listed in %s\n",args->chr[i].name,args->ref_fai_fname);
+        chr_t *chr = &args->chr[i];
+        free(chr->name);
+        free(chr->regs);
+        if ( args->nchr - i > 1 ) memmove(&args->chr[i],&args->chr[i+1],sizeof(*args->chr)*(args->nchr - i - 1));
+        args->nchr--;
+    }
 
     // read calls
     int is_bed = is_bed_file(args->calls_fname);
