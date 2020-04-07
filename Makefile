@@ -1,4 +1,4 @@
-# Copyright (C) 2019 Genome Research Ltd.
+# Copyright (C) 2019-2020 Genome Research Ltd.
 #
 # Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -23,6 +23,11 @@
 
 # Edit the location of HTSlib here or run as HTSDIR=/path/to/htslib make
 export HTSDIR = ../htslib
+
+# Create the config.mk file manually to override the default settings
+ifneq "$(wildcard config.mk)" ""
+include config.mk
+endif
 
 TARGETS = annot-regs dist perm-test
 

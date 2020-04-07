@@ -1,4 +1,4 @@
-# Copyright (C) 2018-2019 Genome Research Ltd.
+# Copyright (C) 2018-2020 Genome Research Ltd.
 #
 # Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -19,6 +19,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
+
+# Create the config.mk file manually to override the default settings
+ifneq "$(wildcard config.mk)" ""
+include config.mk
+endif
 
 CC     ?= gcc
 CFLAGS ?= -Wall -g -O2 -I ../libs
