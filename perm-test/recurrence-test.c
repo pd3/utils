@@ -396,8 +396,9 @@ static void init_data(args_t *args)
 
     args->dist = (uint32_t*) calloc(DIST_N(args),sizeof(*args->nhit));
 
-    // sanity check for random placements: expected maximum number of attempts in inaccessible regions
-    args->ntry = 10 * genome_len / bg_len;
+    // Sanity check for random placements: expected maximum number of attempts in inaccessible regions
+    // This should be informed by standard deviation
+    args->ntry = 1000.0 * genome_len / bg_len;
 }
 static void destroy_data(args_t *args)
 {
@@ -444,7 +445,7 @@ static void run_test(args_t *args)
             if ( is_hit ) break;
             if ( args->bg_idx && regidx_overlap(args->bg_idx,chr->name,pos,pos+len-1,NULL) ) break;
         }
-        if ( ntry==args->ntry ) error("Check me: this does not look right, too many failures\n");
+        if ( ntry==args->ntry ) error("[Check me] This does not look right, too many failures: ntry=%d  len=%d\n",args->ntry,len);
         if ( !is_hit ) continue;
 
         // mark all genes hit by the call

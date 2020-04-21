@@ -15,8 +15,8 @@
 
 
     ./recurrence-test -c test/recurrence.1.calls.txt -a test/recurrence.1.bg.txt -l test/recurrence.1.tgt.txt -f test/recurrence.1.fai -n 1e5 -s 1587471914
-        TEST	gene_A	2	15115	100000
-        TEST	gene_B	0	100000	44347
+        TEST gene_A  2  84629 15371 0
+        TEST gene_B  0  0     44601 55399
     
         A exp: (7/18)**2   = 0.1512
         B exp: (12./18)**2 = 0.4444
