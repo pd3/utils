@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-#   Copyright (C) 2018 Genome Research Ltd.
+#   Copyright (C) 2018-2020 Genome Research Ltd.
 #
 #   Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -69,6 +69,9 @@ test_perm_test($opts,in=>'fill.1',out=>'fill.1.1.out',args=>'-d');
 test_perm_test($opts,in=>'fill.1',out=>'fill.1.2.out',args=>'-s 1536299302 -n 1e5');
 test_perm_test($opts,in=>'overlaps.1',out=>'overlaps.1.1.out',args=>'-d');
 test_perm_test($opts,in=>'overlaps.1',out=>'overlaps.1.2.out',args=>'-s 1536695456 -n 1e5');
+test_recurrence($opts,in=>'recurrence.binom',calls=>'recurrence.binom.1',out=>'recurrence.binom.1.out',args=>'-s 1587500664 -n 1e5');
+test_recurrence($opts,in=>'recurrence.dice',calls=>'recurrence.dice.1',out=>'recurrence.dice.1.out',args=>'-s 1587538882 -n 1e5');
+test_recurrence($opts,in=>'recurrence.1',out=>'recurrence.1.1.out',args=>'-s 1536695456 -n 1e5');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};
@@ -249,5 +252,17 @@ sub test_perm_test
     my $fai   = exists($args{fai}) ? $args{fai} : "$pref.fai";
     my $calls = exists($args{calls}) ? "$args{calls}.calls.$ext" : "$pref.calls.$ext";
     test_cmd($opts,%args,cmd=>"$$opts{bin}/perm-test -c $$opts{path}/$calls -b $$opts{path}/$pref.bg.$ext -t $$opts{path}/$pref.tgt.$ext -f $$opts{path}/$fai $args | grep -ve ^CMD -e ^VERSION");
+}
+
+sub test_recurrence
+{
+    my ($opts,%args) = @_;
+    my $ext   = $args{bed} ? 'bed' : 'txt';
+    my $pref  = $args{in};
+    my $args  = $args{args};
+    my $fai   = exists($args{fai}) ? $args{fai} : "$pref.fai";
+    my $bg    = exists($args{bg}) ? "-a $args{bg}" : (-e "$$opts{path}/$pref.bg.$ext" ? "-a $$opts{path}/$pref.bg.$ext" : '' );
+    my $calls = exists($args{calls}) ? "$args{calls}.calls.$ext" : "$pref.calls.$ext";
+    test_cmd($opts,%args,cmd=>"$$opts{bin}/recurrence-test -c $$opts{path}/$calls $bg -l $$opts{path}/$pref.tgt.$ext -f $$opts{path}/$fai $args | grep -ve ^CMD -e ^VERSION");
 }
 

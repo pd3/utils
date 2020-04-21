@@ -32,20 +32,23 @@ include $(HTSDIR)/htslib_static.mk
 CC     ?= gcc
 CFLAGS ?= -Wall -g -O2 -I ../libs -I $(HTSDIR)
 LDLIBS ?= ../libs/regidx.o $(HTSDIR)/libhts.a $(HTSLIB_static_LIBS)
-BIN     = perm-test
-SOURCES = perm-test.c
-OBJECTS = $(SOURCES:.c=.o)
+BIN     = perm-test recurrence-test
 
 
 all: $(BIN)
 
 perm-test.o: ../libs/version.h perm-test.c
 
+recurrence-test.o: ../libs/version.h recurrence-test.c
+
+perm-test: perm-test.o
+	$(CC) $(LDFLAGS) perm-test.o $(LDLIBS) -o $@
+
+recurrence-test: recurrence-test.o
+	$(CC) $(LDFLAGS) recurrence-test.o $(LDLIBS) -o $@
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
-
-$(BIN):%: $(OBJECTS)
-	$(CC) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
 
 test: $(BIN)
 	./test/test.pl

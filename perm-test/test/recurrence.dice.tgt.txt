@@ -1,0 +1,6 @@
+1	1	1   side1
+1	2	2   side2
+1	3	3   side3
+1	4	4   side4
+1	5	5   side5
+1	6	6   side6
