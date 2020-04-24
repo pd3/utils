@@ -18,6 +18,7 @@
 #    - number of simulations with this many hits
 SEED	1533323562
 NITER_ROUNDS	1.000000e+05	1
+MSG	Maximum chromosome randomization error due to length discretization: 1.5e-03%
 TEST_ENR	100000	20202	2.020200e-01
 TEST_DPL	100000	100000	1.000000e+00
 TEST_FOLD	1	0.202020	0.401507

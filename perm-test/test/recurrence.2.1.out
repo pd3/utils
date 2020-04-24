@@ -1,4 +1,4 @@
-SEED	1587500664
+SEED	1536695456
 NITER	1.000000e+05
 MSG	Maximum chromosome randomization error due to length discretization: 0.0e+00%
 # TEST:
@@ -11,8 +11,10 @@ MSG	Maximum chromosome randomization error due to length discretization: 0.0e+00
 #     - gene
 #     - nSimHits .. the number of simulations with 0,1,2,etc. hits in the gene
 # [1]TEST	[2]gene	[3]nObserved	[4]nSimFewer	[5]nSimEqual	[6]nSimExceeded
-TEST	side1	2	74913	25087	0
-TEST	side2	0	0	25087	74913
+TEST	gene_A	2	84629	15371	0
+TEST	gene_C	2	84629	15371	0
+TEST	gene_B	0	0	44601	55399
 # [1]DIST	[2]gene	[3-]nSimHits (0,1,etc. hits)
-DIST	side1	25013	49900	25087
-DIST	side2	25087	49900	25013
+DIST	gene_A	37182	47447	15371
+DIST	gene_C	37182	47447	15371
+DIST	gene_B	44601	44263	11136

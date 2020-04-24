@@ -72,6 +72,7 @@ test_perm_test($opts,in=>'overlaps.1',out=>'overlaps.1.2.out',args=>'-s 15366954
 test_recurrence($opts,in=>'recurrence.binom',calls=>'recurrence.binom.1',out=>'recurrence.binom.1.out',args=>'-s 1587500664 -n 1e5');
 test_recurrence($opts,in=>'recurrence.dice',calls=>'recurrence.dice.1',out=>'recurrence.dice.1.out',args=>'-s 1587538882 -n 1e5');
 test_recurrence($opts,in=>'recurrence.1',out=>'recurrence.1.1.out',args=>'-s 1536695456 -n 1e5');
+test_recurrence($opts,in=>'recurrence.2',out=>'recurrence.2.1.out',args=>'-s 1536695456 -n 1e5');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};

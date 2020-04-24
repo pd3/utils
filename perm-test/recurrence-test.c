@@ -52,6 +52,8 @@
 #include <getopt.h>
 #include "../libs/version.h"
 
+#define NBIN2CHR (1<<16)
+
 #define DIST_N(args) (((args)->ncall+1)*(args)->regs.nlbl)
 #define DIST_IDX(args,ilbl,cnt) (((args)->ncall+1)*(ilbl)+(cnt))
 
@@ -73,8 +75,9 @@ typedef struct
 {
     uint32_t nreg, mreg;
     uint32_t nlbl, nchr;
+    uint32_t nbin2chr;
     reg_t *reg;
-    chr_t *chr;
+    chr_t *chr, **bin2chr;
     char **lbl;
     void *lbl2i;
     void *chr2i;
@@ -195,14 +198,33 @@ static void read_regions(char *fname, regs_t *regs)
         if ( lbl2i )
         {
             lbl_end[1] = 0;
-            if ( khash_str2int_get(lbl2i,lbl_beg,&reg->ilbl)!=0 )
+            char *bp = lbl_beg;
+            while ( *bp )   // this can be a comma-separated list of labels
             {
-                regs->nlbl++;
-                regs->lbl = (char**)realloc(regs->lbl,sizeof(*regs->lbl)*regs->nlbl);
-                regs->lbl[regs->nlbl-1] = strdup(lbl_beg);
-                khash_str2int_inc(lbl2i, regs->lbl[regs->nlbl-1]);
+                char *ep = bp;
+                while ( *ep && *ep!=',' ) ep++;
+                if ( *ep ) { *ep = 0; ep++; }
+                if ( khash_str2int_get(lbl2i,bp,&reg->ilbl)!=0 )
+                {
+                    regs->nlbl++;
+                    regs->lbl = (char**)realloc(regs->lbl,sizeof(*regs->lbl)*regs->nlbl);
+                    regs->lbl[regs->nlbl-1] = strdup(bp);
+                    khash_str2int_inc(lbl2i, regs->lbl[regs->nlbl-1]);
+                    if ( khash_str2int_get(lbl2i,bp,&reg->ilbl)!=0 )
+                        error("Failed to hash \"%s\"??\n", bp);
+                }
+                bp = ep;
+
+                if ( *bp )
+                {
+                    regs->nreg++;
+                    hts_expand(reg_t,regs->nreg,regs->mreg,regs->reg);
+                    reg = &regs->reg[regs->nreg-1];
+                    reg->beg  = beg;
+                    reg->end  = end;
+                    reg->ichr = ichr;
+                }
             }
-            if ( khash_str2int_get(lbl2i,lbl_beg,&reg->ilbl)!=0 ) error("Failed to hash \"%s\"??\n", lbl_beg);
         }
         else
             reg->ilbl = 0;
@@ -264,6 +286,26 @@ static void trim_chrs(regs_t *regs, regidx_t *idx)
         if ( i+1 < regs->nchr ) memmove(&regs->chr[i],&regs->chr[i+1],sizeof(*regs->chr)*(regs->nchr-i-1));
         regs->nchr--;
     }
+}
+static void init_bin2chr(args_t *args, regs_t *regs)
+{
+    regs->bin2chr = (chr_t**) calloc(NBIN2CHR,sizeof(*regs->bin2chr));
+    double tot_len = 0;
+    int i,j;
+    for (i=0; i<regs->nchr; i++)
+        tot_len += regs->chr[i].len;
+
+    double bin_len = tot_len / NBIN2CHR, max_diff = 0;
+    for (i=0,j=0; i<regs->nchr; i++)
+    {
+        int k, kmax = regs->chr[i].len/tot_len*NBIN2CHR;
+        for (k=0; k<kmax; k++)
+            regs->bin2chr[j++] = &regs->chr[i];
+        double diff = fabs(kmax*bin_len - regs->chr[i].len)*100./regs->chr[i].len;
+        if ( max_diff < diff ) max_diff = diff;
+    }
+    regs->nbin2chr = j;
+    fprintf(args->out_fh,"MSG\tMaximum chromosome randomization error due to length discretization: %.1e%%\n", max_diff);
 }
 static void init_data(args_t *args)
 {
@@ -337,6 +379,10 @@ static void init_data(args_t *args)
     if ( !args->bg_idx ) trim_chrs(regs,args->tgt_idx);
     args->tgt_itr = regitr_init(args->tgt_idx);
     free(regs->reg);
+
+
+    // initialize chromozome randomization
+    init_bin2chr(args, regs);
 
     // initialize tracking arrays
     args->nobs = (uint32_t*) calloc(regs->nlbl,sizeof(*args->nobs));
@@ -420,6 +466,7 @@ static void destroy_data(args_t *args)
     free(args->nhit);
     free(args->call);
     free(args->dist);
+    free(args->regs.bin2chr);
     kbs_destroy(args->hit);
 }
 
@@ -437,8 +484,8 @@ static void run_test(args_t *args)
         for (ntry=0; ntry<args->ntry; ntry++)
         {
             // randomly assign a chromosome
-            int ichr = (double)random()/((double)RAND_MAX+1) * regs->nchr;
-            chr_t *chr = &regs->chr[ichr];
+            int ibin = (double)random()/((double)RAND_MAX+1) * regs->nbin2chr;
+            chr_t *chr = regs->bin2chr[ibin];
             if ( chr->len < len ) continue;
             uint32_t pos = (double)random()/((double)RAND_MAX+1) * (chr->len - len + 1);
             is_hit = regidx_overlap(args->tgt_idx,chr->name,pos,pos+len-1,args->tgt_itr);
@@ -480,18 +527,23 @@ static void usage(void)
         "About: Run recurrence enrichment (permutation) test.\n"
         "Usage: recurrence-test [OPTIONS]\n"
         "Options:\n"
-        "   -a, --accessible-regs FILE      Optional list of accessible regions (otherwise equals to -l): chr,beg,end\n"
-        "   -c, --calls FILE                Calls: chr,beg,end\n"
+        "   -a, --accessible-regs FILE      Optional list of accessible regions (otherwise equals to -l): chr\\tbeg\\tend\n"
+        "   -c, --calls FILE                Calls: chr\\tbeg\\tend\n"
         "   -d, --debug-regions             Print the spliced regions (and stop)\n"
-        "   -f, --ref-fai FILE              Chromosome lengths, given for example as fai index: chr,length\n"
-        "   -l, --labeled-regs FILE         Labeled regions to test the recurrence: chr,beg,end,label\n"
+        "   -f, --ref-fai FILE              Chromosome lengths, given for example as fai index: chr\\tlength\n"
+        "   -l, --labeled-regs FILE         Labeled regions to test the recurrence: chr\\tbeg\\tend\\tlabel[,label2,...]\n"
         "   -m, --max-call-length INT       Skip big calls [10e6]\n"
         "   -n, --niter INT                 Number of iterations to run\n"
         "   -o, --output FILE               Place output in FILE\n"
         "   -s, --random-seed INT           Random seed\n"
         "\n"
         "Examples:\n"
-        "   [todo]"
+        "   # Take a set of \"labeled\" regions (e.g. a list of genes) and calculate how likely it is for a gene\n"
+        "   # to be recurrently overlapped by a call (e.g. affected by multiple CNVs).\n"
+        "   recurrence-test -l genes.txt -c calls.txt -f ref.fai -n 1e6\n"
+        "\n"
+        "   # Same as above, but restrict the permutations to accessible regions (e.g. exome baits)\n"
+        "   recurrence-test -a baits.bed -l genes.txt -c calls.txt -f ref.fai -n 1e6\n",
         "\n",
         UTILS_VERSION
         );
@@ -559,12 +611,13 @@ int main(int argc, char **argv)
     }
     srandom(seed);
 
-    init_data(args);
-
     fprintf(args->out_fh, "VERSION\t%s\n",UTILS_VERSION);
     fprintf(args->out_fh, "CMD\t%s",argv[0]); for (c=1; c<argc; c++) fprintf(args->out_fh, " %s", argv[c]); fprintf(args->out_fh, "\n");
     fprintf(args->out_fh, "SEED\t%d\n", seed);
     fprintf(args->out_fh, "NITER\t%e\n", (double)args->niter);
+
+    init_data(args);
+
     fprintf(args->out_fh,"# TEST:\n");
     fprintf(args->out_fh,"#     - gene .. the region label\n");
     fprintf(args->out_fh,"#     - nObserved .. number of hits observed in input data in this gene\n");
@@ -595,6 +648,7 @@ int main(int argc, char **argv)
     }
 
     destroy_data(args);
+    if ( args->output_fname && fclose(args->out_fh) ) error("Error: close failed %s\n", args->output_fname);
     free(args);
 
     return 0;

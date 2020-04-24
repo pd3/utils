@@ -62,6 +62,8 @@
 
 KHASH_MAP_INIT_INT(int2int, int)
 
+#define NBIN2CHR (1<<16)
+
 typedef struct
 {
     uint32_t beg, len:31, is_tgt:1;
@@ -88,7 +90,8 @@ typedef struct
     uint32_t *niter_hits;       // number of hits in each permutation
     uint32_t *calls;            // call lengths, sorted in ascending order
     uint32_t max_call_len;      // skip calls longer than this
-    chr_t *chr;
+    uint32_t nbin2chr;
+    chr_t *chr, **bin2chr;
     int nchr, ncalls;
     char *calls_fname, *background_fname, *targets_fname, *ref_fai_fname, *output_fname;
     uint32_t niter, nrounds;    // number of iterations to run and the number of rounds
@@ -203,7 +206,26 @@ void merge_and_splice_regions(args_t *args, chr_t *chr)
             fprintf(args->out_fh, "%s\t%s\t%d\t%d\n", chr->regs[i].is_tgt ? "TGT" : "BG", chr->name, chr->regs[i].beg+1, chr->regs[i].beg + chr->regs[i].len);
     }
 }
+static void init_bin2chr(args_t *args)
+{
+    args->bin2chr = (chr_t**) calloc(NBIN2CHR,sizeof(*args->bin2chr));
+    double tot_len = 0;
+    int i,j;
+    for (i=0; i<args->nchr; i++)
+        tot_len += args->chr[i].len;
 
+    double bin_len = tot_len / NBIN2CHR, max_diff = 0;
+    for (i=0,j=0; i<args->nchr; i++)
+    {
+        int k, kmax = args->chr[i].len/tot_len*NBIN2CHR;
+        for (k=0; k<kmax; k++)
+            args->bin2chr[j++] = &args->chr[i];
+        double diff = fabs(kmax*bin_len - args->chr[i].len)*100./args->chr[i].len;
+        if ( max_diff < diff ) max_diff = diff;
+    }
+    args->nbin2chr = j;
+    fprintf(args->out_fh,"MSG\tMaximum chromosome randomization error due to length discretization: %.1e%%\n", max_diff);
+}
 int is_bed_file(const char *fname)
 {
     int len = strlen(fname);
@@ -295,6 +317,7 @@ void init_data(args_t *args)
         if ( args->nchr - i > 1 ) memmove(&args->chr[i],&args->chr[i+1],sizeof(*args->chr)*(args->nchr - i - 1));
         args->nchr--;
     }
+    init_bin2chr(args);
 
     // read calls
     int is_bed = is_bed_file(args->calls_fname);
@@ -347,6 +370,7 @@ void destroy_data(args_t *args)
     free(args->chr);
     free(args->niter_hits);
     free(args->calls);
+    free(args->bin2chr);
     regidx_destroy(args->tgt_idx);
     regidx_destroy(args->bg_idx);
     regitr_destroy(args->tgt_itr);
@@ -444,8 +468,8 @@ void run_test(args_t *args, uint32_t call_len)
     for (i=0; i<args->niter; i++)
     {
         // randomly assign a chromosome
-        int ichr = (double)random()/((double)RAND_MAX+1) * args->nchr;
-        chr_t *chr = &args->chr[ichr];
+        int ibin = (double)random()/((double)RAND_MAX+1) * args->nbin2chr;
+        chr_t *chr = args->bin2chr[ibin];
 
         if ( chr->len <= call_len )
         {

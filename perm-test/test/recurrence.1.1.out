@@ -1,5 +1,6 @@
 SEED	1536695456
 NITER	1.000000e+05
+MSG	Maximum chromosome randomization error due to length discretization: 0.0e+00%
 # TEST:
 #     - gene .. the region label
 #     - nObserved .. number of hits observed in input data in this gene
