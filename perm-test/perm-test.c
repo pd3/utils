@@ -320,6 +320,7 @@ void init_data(args_t *args)
     init_bin2chr(args);
 
     // read calls
+    int nskip  = 0;
     int is_bed = is_bed_file(args->calls_fname);
     fp = bgzf_open(args->calls_fname,"r");
     if ( !fp ) error("Failed to read: %s\n", args->calls_fname);
@@ -337,6 +338,7 @@ void init_data(args_t *args)
         int is_bg  = regidx_overlap(args->bg_idx, chr_beg,beg,end, NULL);
         if ( (!is_tgt && !is_bg) || end - beg + 1 > args->max_call_len )
         {
+            nskip++;
             if ( args->debug ) fprintf(args->out_fh, "CALL\tSKIP\t%s\t%d\t%d\n", chr_beg,beg+1,end+1);
             continue;
         }
@@ -355,6 +357,8 @@ void init_data(args_t *args)
     if ( !args->ncalls && !args->debug )
         error("Error: none of the calls intersects the tgt or bg regions (calls larger than `-m %d` were excluded)\n", args->max_call_len);
     qsort(args->calls, args->ncalls, sizeof(*args->calls), uint32t_cmp);
+
+    fprintf(args->out_fh, "NCALLS\t%d\t%d\n", args->ncalls,nskip);
 }
 void destroy_data(args_t *args)
 {
@@ -525,7 +529,7 @@ static void usage(void)
         "   -d, --debug-regions             Print the spliced regions (and stop)\n"
         "   -f, --ref-fai FILE              Chromosome lengths, given for example as fai index: chr,length\n"
         "   -m, --max-call-length INT       Skip big calls [10e6]\n"
-        "   -n, --niter NUM1[,NUM2]         Number of iterations: total (NUM1) and per-batch (NUM2, reduces memory)\n"
+        "   -n, --niter NUM1[,NUM2]         Number of iterations: total (NUM1) and per-batch (NUM2, smaller number reduces memory)\n"
         "       --no-bg-overlap             Permuted variants must not overlap background regions\n"
         "   -o, --output FILE               Place output in FILE\n"
         "   -p, --print-placements          Print all random placements\n"
@@ -630,6 +634,9 @@ int main(int argc, char **argv)
         fprintf(args->out_fh, "# NITER_ROUNDS:\n");
         fprintf(args->out_fh, "#    - number of iterations total\n");
         fprintf(args->out_fh, "#    - number of batches\n");
+        fprintf(args->out_fh, "# NCALLS:\n");
+        fprintf(args->out_fh, "#    - number of calls used\n");
+        fprintf(args->out_fh, "#    - number of calls skipped because of their size or inaccessibility\n");
         fprintf(args->out_fh, "# TEST_ENR:\n");
         fprintf(args->out_fh, "#    - number of iterations\n");
         fprintf(args->out_fh, "#    - number of times the simulation had the same or more hits than observed in input data\n");

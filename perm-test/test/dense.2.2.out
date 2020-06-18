@@ -1,6 +1,9 @@
 # NITER_ROUNDS:
 #    - number of iterations total
 #    - number of batches
+# NCALLS:
+#    - number of calls used
+#    - number of calls skipped because of their size or inaccessibility
 # TEST_ENR:
 #    - number of iterations
 #    - number of times the simulation had the same or more hits than observed in input data
@@ -19,6 +22,7 @@
 SEED	1536548501
 NITER_ROUNDS	1.000000e+05	1
 MSG	Maximum chromosome randomization error due to length discretization: 1.5e-03%
+NCALLS	1	0
 TEST_ENR	100000	12009	1.200900e-01
 TEST_DPL	100000	100000	1.000000e+00
 TEST_FOLD	1	0.120090	0.325067

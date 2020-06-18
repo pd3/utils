@@ -16,3 +16,4 @@ BG	3	2001	2100
 MSG	Maximum chromosome randomization error due to length discretization: 1.5e-03%
 CALL	TGT	1	1350	1350
 CALL	TGT	1	1351	1351
+NCALLS	2	0
