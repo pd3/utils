@@ -31,13 +31,13 @@ include $(HTSDIR)/htslib_static.mk
 
 CC     ?= gcc
 CFLAGS ?= -Wall -g -O2 -I ../libs -I $(HTSDIR)
-LDLIBS ?= ../libs/regidx.o $(HTSDIR)/libhts.a $(HTSLIB_static_LIBS)
+LDLIBS ?= ../libs/regidx.o ../libs/dist.o $(HTSDIR)/libhts.a $(HTSLIB_static_LIBS)
 BIN     = perm-test recurrence-test
 
 
 all: $(BIN)
 
-perm-test.o: ../libs/version.h perm-test.c
+perm-test.o: ../libs/version.h ../libs/dist.h perm-test.c
 
 recurrence-test.o: ../libs/version.h recurrence-test.c
 

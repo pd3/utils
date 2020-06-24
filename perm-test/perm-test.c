@@ -59,6 +59,7 @@
 #include <htslib/kseq.h>
 #include <getopt.h>
 #include "../libs/version.h"
+#include "../libs/dist.h"
 
 KHASH_MAP_INIT_INT(int2int, int)
 
@@ -97,7 +98,7 @@ typedef struct
     uint32_t niter, nrounds;    // number of iterations to run and the number of rounds
     regidx_t *tgt_idx, *bg_idx;
     regitr_t *tgt_itr, *bg_itr;
-    int debug, hit_no_bg, print_placements;
+    int debug, hit_no_bg, print_placements, ndist;
     FILE *out_fh;
 }
 args_t;
@@ -531,6 +532,7 @@ static void usage(void)
         "   -m, --max-call-length INT       Skip big calls [10e6]\n"
         "   -n, --niter NUM1[,NUM2]         Number of iterations: total (NUM1) and per-batch (NUM2, smaller number reduces memory)\n"
         "       --no-bg-overlap             Permuted variants must not overlap background regions\n"
+        "       --nprecise-dist INT         Orders of magnitude to represent exactly in the distribution [5]\n"
         "   -o, --output FILE               Place output in FILE\n"
         "   -p, --print-placements          Print all random placements\n"
         "   -s, --random-seed INT           Random seed\n"
@@ -559,8 +561,10 @@ int main(int argc, char **argv)
     args_t *args = (args_t*) calloc(1,sizeof(args_t));
     args->nrounds = 1;
     args->max_call_len = 10e6;
+    args->ndist = 5;
     static struct option loptions[] =
     {
+        {"nprecise-dist",required_argument,NULL,2},
         {"print-placements",no_argument,NULL,'p'},
         {"no-bg-overlap",no_argument,NULL,1},
         {"max-call-len",required_argument,NULL,'m'},
@@ -581,6 +585,11 @@ int main(int argc, char **argv)
         switch (c) 
         {
             case  1 : args->hit_no_bg = 1; break;
+            case  2 : 
+                args->ndist = strtol(optarg, &tmp, 10);
+                if ( tmp==optarg || *tmp ) error("Could not parse --nprecise-dist %s\n", optarg);
+                if ( args->ndist<1 ) error("Nonsense value to --nprecise-dist %s\n", optarg);
+                break;
             case 'p': args->print_placements = 1; break;
             case 'm': 
                 args->max_call_len = strtod(optarg, &tmp); 
@@ -649,9 +658,11 @@ int main(int argc, char **argv)
         fprintf(args->out_fh, "#    - number of hits in the input data\n");
         fprintf(args->out_fh, "#    - average number of hits in simulations\n");
         fprintf(args->out_fh, "#    - average of standard deviations approximated from each batch using the current average estimate\n");
-        fprintf(args->out_fh, "# DIST:\n");
-        fprintf(args->out_fh, "#    - number of hits in a simulation\n");
-        fprintf(args->out_fh, "#    - number of simulations with this many hits\n");
+        fprintf(args->out_fh, "# DIST, the distribution of number of hits in the simulations:\n");
+        fprintf(args->out_fh, "#    - numbef of hits in a simulation: the start of the half-closed, half-open distribution bin [beg,end)\n");
+        fprintf(args->out_fh, "#    - numbef of hits in a simulation: the end of the half-closed, half-open distributin bin [beg,end)\n");
+        fprintf(args->out_fh, "#    - number of simulations with this many hits (raw count)\n");
+        fprintf(args->out_fh, "#    - number of simulations with this many hits (density)\n");
         fprintf(args->out_fh, "VERSION\t%s\n",UTILS_VERSION);
         fprintf(args->out_fh, "CMD\t%s",argv[0]); for (c=1; c<argc; c++) fprintf(args->out_fh, " %s", argv[c]); fprintf(args->out_fh, "\n");
         fprintf(args->out_fh, "SEED\t%d\n", seed);
@@ -663,7 +674,7 @@ int main(int argc, char **argv)
 
     if ( args->debug!=1 )
     {
-        khash_t(int2int) *dist_hash = kh_init(int2int);
+        dist_t *dist = dist_init(args->ndist);
         double navg_tgt_hits = 0, dev = 0;
         uint64_t nexc = 0, nfew = 0, ntot = 0;
         uint32_t i,j;
@@ -688,18 +699,7 @@ int main(int argc, char **argv)
                 dev += (args->niter_hits[i] - avg)*(args->niter_hits[i] - avg);
 
             for (i=0; i<args->niter; i++)
-            {
-                int key = args->niter_hits[i];
-                khint_t k = kh_get(int2int, dist_hash, key);
-                if ( k == kh_end(dist_hash) )
-                {
-                    int ret;
-                    k = kh_put(int2int, dist_hash, key, &ret);
-                    assert(ret>0);
-                    kh_val(dist_hash, k) = 0;
-                }
-                kh_val(dist_hash, k)++;
-            }
+                dist_insert(dist, args->niter_hits[i]);
         }
         if ( ntot )
         {
@@ -708,10 +708,17 @@ int main(int argc, char **argv)
             fprintf(args->out_fh, "TEST_ENR\t%"PRIu64"\t%"PRIu64"\t%s%e\n", ntot,nexc,nexc?"":"<",pval_enr);
             fprintf(args->out_fh, "TEST_DPL\t%"PRIu64"\t%"PRIu64"\t%s%e\n", ntot,nfew,nfew?"":"<",pval_dpl);
             fprintf(args->out_fh, "TEST_FOLD\t%"PRIu32"\t%f\t%f\n", args->nobs_tgt_hits,navg_tgt_hits/ntot,sqrt(dev/ntot));
-            for (i=0; i<kh_end(dist_hash); i++)
-                if ( kh_exist(dist_hash,i) ) fprintf(args->out_fh, "DIST\t%d\t%d\n",kh_key(dist_hash,i),kh_val(dist_hash,i));
+
+            int n = dist_n(dist);
+            uint32_t beg, end;
+            for (i=0; i<n; i++)
+            {
+                uint64_t cnt = dist_get(dist, i, &beg, &end);
+                if ( !cnt ) continue;
+                printf("DIST\t%u\t%u\t%"PRIu64"\t%e\n", beg, end, cnt, (double)cnt/(end-beg));
+            }
         }
-        kh_destroy(int2int, dist_hash);
+        dist_destroy(dist);
     }
 
     destroy_data(args);

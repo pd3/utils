@@ -16,9 +16,11 @@
 #    - number of hits in the input data
 #    - average number of hits in simulations
 #    - average of standard deviations approximated from each batch using the current average estimate
-# DIST:
-#    - number of hits in a simulation
-#    - number of simulations with this many hits
+# DIST, the distribution of number of hits in the simulations:
+#    - numbef of hits in a simulation: the start of the half-closed, half-open distribution bin [beg,end)
+#    - numbef of hits in a simulation: the end of the half-closed, half-open distributin bin [beg,end)
+#    - number of simulations with this many hits (raw count)
+#    - number of simulations with this many hits (density)
 SEED	1536299302
 NITER_ROUNDS	1.000000e+05	1
 MSG	Maximum chromosome randomization error due to length discretization: 0.0e+00%
@@ -26,5 +28,5 @@ NCALLS	1	0
 TEST_ENR	100000	80007	8.000700e-01
 TEST_DPL	100000	100000	1.000000e+00
 TEST_FOLD	1	0.800070	0.399947
-DIST	0	19993
-DIST	1	80007
+DIST	0	1	19993	1.999300e+04
+DIST	1	2	80007	8.000700e+04
