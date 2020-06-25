@@ -715,7 +715,7 @@ int main(int argc, char **argv)
             {
                 uint64_t cnt = dist_get(dist, i, &beg, &end);
                 if ( !cnt ) continue;
-                printf("DIST\t%u\t%u\t%"PRIu64"\t%e\n", beg, end, cnt, (double)cnt/(end-beg));
+                fprintf(args->out_fh, "DIST\t%u\t%u\t%"PRIu64"\t%e\n", beg, end, cnt, (double)cnt/(end-beg));
             }
         }
         dist_destroy(dist);
