@@ -53,3 +53,5 @@ dkms.conf
 libs/version.h
 htslib
 dist/dist
+config.mk
+*/config.mk

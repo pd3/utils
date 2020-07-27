@@ -1,5 +1,5 @@
 /* 
-    Copyright (C) 2018-2019 Genome Research Ltd.
+    Copyright (C) 2018-2020 Genome Research Ltd.
     
     Author: Petr Danecek <pd3@sanger.ac.uk>
     
@@ -36,6 +36,7 @@
 
 #define ANN_NBP     1
 #define ANN_FRAC    2
+#define ANN_CNT     4
 
 typedef struct
 {
@@ -76,7 +77,7 @@ dat_t;
 #define NBP_IS_END(x)  (((x)&1)==1)
 typedef struct
 {
-    int n,m;
+    int n,m;            // n is a multiple of two: breakpoints are stored in regs, not regions
     uint32_t *regs;     // change to uint64_t for very large genomes
     uint32_t beg,end;   // the current destination interval
 }
@@ -480,8 +481,21 @@ void init_data(args_t *args)
         args->dst.annots_idx = (int*) malloc(sizeof(int)*args->dst.annots->n);
         for (i=0; i<args->src.annots->n; i++)
         {
-            if ( !strcasecmp(args->src.annots->off[i],"nbp") ) args->dst.annots_idx[i] = ANN_NBP;
-            else if ( !strcasecmp(args->src.annots->off[i],"frac") ) args->dst.annots_idx[i] = ANN_FRAC;
+            if ( !strcasecmp(args->src.annots->off[i],"nbp") )
+            {
+                args->dst.annots_idx[i] = ANN_NBP;
+                cols_append(args->dst.hdr.cols,"nbp");
+            }
+            else if ( !strcasecmp(args->src.annots->off[i],"frac") )
+            {
+                args->dst.annots_idx[i] = ANN_FRAC;
+                cols_append(args->dst.hdr.cols,"frac");
+            }
+            else if ( !strcasecmp(args->src.annots->off[i],"cnt") )
+            {
+                args->dst.annots_idx[i] = ANN_CNT;
+                cols_append(args->dst.hdr.cols,"cnt");
+            }
             else error("The annotation \"%s\" is not recognised\n", args->src.annots->off[i]);
         }
         args->nbp = nbp_init();
@@ -556,6 +570,11 @@ static void write_annots(args_t *args)
         {
             kputc('\t',&args->tmp_kstr);
             kputd((double)len/(args->nbp->end - args->nbp->beg + 1),&args->tmp_kstr);
+        }
+        else if ( args->dst.annots_idx[i]==ANN_CNT ) 
+        {
+            kputc('\t',&args->tmp_kstr);
+            kputw(args->nbp->n/2,&args->tmp_kstr);
         }
     }
     write_string(args, args->tmp_kstr.s, args->tmp_kstr.l);
@@ -700,6 +719,7 @@ static const char *usage_text(void)
         "Options:\n"
         "       --allow-dups                Add annotations multiple times\n"
         "   -a, --annotate list             Add special annotations:\n"
+        "                                       cnt  .. number of overlapping regions\n"
         "                                       frac .. fraction of the destination region with an overlap\n"
         "                                       nbp  .. number of source base pairs in the overlap\n"
         "   -c, --core src:dst              Core columns [chr,beg,end:chr,beg,end]\n"

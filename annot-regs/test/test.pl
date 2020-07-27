@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-#   Copyright (C) 2018 Genome Research Ltd.
+#   Copyright (C) 2018-2020 Genome Research Ltd.
 #
 #   Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -51,6 +51,7 @@ test_annot_regs($opts,src=>'src.5.txt',dst=>'dst.5.txt',out=>'out.5.1.txt',args=
 test_annot_regs($opts,src=>'src.6.txt',dst=>'dst.6.txt',out=>'out.6.1.txt',args=>'-c 1,2,2:1,2,2 -a nbp');
 test_annot_regs($opts,src=>'src.7.txt',dst=>'dst.7.txt',out=>'out.7.1.txt',args=>'-c 1,2,2:1,2,2 -t overlap -H');
 test_annot_regs($opts,src=>'src.8.txt',dst=>'dst.8.txt',out=>'out.8.1.txt',args=>'-c chr,beg,end:chr,start,end -m sample -t is_tp');
+test_annot_regs($opts,src=>'src.9.txt',dst=>'dst.9.txt',out=>'out.9.1.txt',args=>'-c 1,2,3:chr,beg,end -a nbp,frac,cnt');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};
