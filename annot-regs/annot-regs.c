@@ -260,19 +260,19 @@ int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uin
     cols_t *cols = cols_split(line, NULL, '\t');
     *((cols_t**)payload) = cols;
 
-    if ( cols->n <= dat->core_idx[0] ) error("Could not parse %s\n", line);
+    if ( cols->n <= dat->core_idx[0] ) error("Expected at least %d columns, found %d: %s\n",dat->core_idx[0]+1,cols->n,line);
     *chr_beg = cols->off[ dat->core_idx[0] ];
     *chr_end = *chr_beg + strlen(*chr_beg) - 1;
 
-    if ( cols->n <= dat->core_idx[1] ) error("Could not parse %s\n", line);
+    if ( cols->n <= dat->core_idx[1] ) error("Expected at least %d columns, found %d: %s\n",dat->core_idx[1]+1,cols->n,line);
     char *tmp, *ptr = cols->off[ dat->core_idx[1] ];
     *beg = strtod(ptr, &tmp);
-    if ( tmp==ptr ) error("Error: Could not parse: %s\n", line);
+    if ( tmp==ptr ) error("Expected numeric value, found \"%s\": %s\n",ptr,cols->n,line);
 
-    if ( cols->n <= dat->core_idx[2] ) error("Could not parse %s\n", line);
+    if ( cols->n <= dat->core_idx[2] ) error("Expected at least %d columns, found %d: %s\n",dat->core_idx[2]+1,cols->n,line);
     ptr = cols->off[ dat->core_idx[2] ];
     *end = strtod(ptr, &tmp);
-    if ( tmp==ptr ) error("Error: Could not parse: %s\n", line);
+    if ( tmp==ptr ) error("Expected numeric value, found \"%s\": %s\n",ptr,line);
 
     if ( *end < *beg )
     {
@@ -633,7 +633,7 @@ void process_line(args_t *args, char *line, size_t size)
         {
             for (i=0; i<args->dst.match->n; i++)
             {
-                if ( args->dst.match_idx[i] > dst_cols->n ) error("Could not parse: %s\n", line);
+                if ( args->dst.match_idx[i] > dst_cols->n ) error("Expected at least %d columns, found %d: %s\n",args->dst.match_idx[i],dst_cols->n,line); 
                 char *dst = dst_cols->off[ args->dst.match_idx[i] ];
                 char *src = src_cols->off[ args->src.match_idx[i] ];
                 if ( strcmp(dst,src) ) break;
