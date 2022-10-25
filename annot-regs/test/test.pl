@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-#   Copyright (C) 2018-2020 Genome Research Ltd.
+#   Copyright (C) 2018-2022 Genome Research Ltd.
 #
 #   Author: Petr Danecek <pd3@sanger.ac.uk>
 #
@@ -52,6 +52,12 @@ test_annot_regs($opts,src=>'src.6.txt',dst=>'dst.6.txt',out=>'out.6.1.txt',args=
 test_annot_regs($opts,src=>'src.7.txt',dst=>'dst.7.txt',out=>'out.7.1.txt',args=>'-c 1,2,2:1,2,2 -t overlap -H');
 test_annot_regs($opts,src=>'src.8.txt',dst=>'dst.8.txt',out=>'out.8.1.txt',args=>'-c chr,beg,end:chr,start,end -m sample -t is_tp');
 test_annot_regs($opts,src=>'src.9.txt',dst=>'dst.9.txt',out=>'out.9.1.txt',args=>'-c 1,2,3:chr,beg,end -a nbp,frac,cnt');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.1.txt',args=>'-t smpl');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.2.txt',args=>'');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.3.txt',args=>'-x');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.4.txt',args=>'-m smpl -t smpl');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.5.txt',args=>'-m smpl ');
+test_annot_regs($opts,src=>'src.10.txt',dst=>'dst.10.txt',out=>'out.10.6.txt',args=>'-m smpl -x');
 
 print "\nNumber of tests:\n";
 printf "    total   .. %d\n", $$opts{nok}+$$opts{nfailed};

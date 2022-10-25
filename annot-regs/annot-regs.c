@@ -1,18 +1,18 @@
-/* 
-    Copyright (C) 2018-2020 Genome Research Ltd.
-    
+/*
+    Copyright (C) 2018-2022 Genome Research Ltd.
+
     Author: Petr Danecek <pd3@sanger.ac.uk>
-    
+
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
     in the Software without restriction, including without limitation the rights
     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
     copies of the Software, and to permit persons to whom the Software is
     furnished to do so, subject to the following conditions:
-    
+
     The above copyright notice and this permission notice shall be included in
     all copies or substantial portions of the Software.
-    
+
     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -66,7 +66,7 @@ typedef struct
 }
 dat_t;
 
-// This is for the special -a annotations, keeps a list of 
+// This is for the special -a annotations, keeps a list of
 // soure regions that hit the destination region. The start
 // coordinates are converted to beg<<1 and end coordinates
 // to (end<<1)+1.
@@ -83,13 +83,15 @@ typedef struct
 }
 nbp_t;
 
+#define PRINT_MATCHING    1
+#define PRINT_NONMATCHING 2
 typedef struct
 {
     nbp_t *nbp;
     dat_t dst, src;
     char *core_str, *match_str, *transfer_str, *annots_str;
     char *temp_dir;
-    int allow_dups, reciprocal, ignore_headers, max_annots;
+    int allow_dups, reciprocal, ignore_headers, max_annots, mode;
     float overlap;
     regidx_t *idx;
     regitr_t *itr;
@@ -410,7 +412,7 @@ void init_data(args_t *args)
     parse_header(&args->src, args->src.fname, args->ignore_headers);
 
     // -c, core columns
-    if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end"; 
+    if ( !args->core_str ) args->core_str = "chr,beg,end:chr,beg,end";
     cols_t *tmp = cols_split(args->core_str, NULL, ':');
     args->src.core = cols_split(tmp->off[0],NULL,',');
     args->dst.core = cols_split(tmp->n==2 ? tmp->off[1] : tmp->off[0],NULL,',');
@@ -430,8 +432,6 @@ void init_data(args_t *args)
         if ( args->src.match->n != args->dst.match->n ) error("Expected equal number of columns: %s\n", args->match_str);
         cols_destroy(tmp);
     }
-
-    if ( !args->transfer_str && !args->annots_str ) error("Missing the -t, --transfer or the -a, --annotate option\n");
 
     // -t, transfer columns
     int i;
@@ -561,17 +561,17 @@ static void write_annots(args_t *args)
     int i, len = nbp_length(args->nbp);
     for (i=0; i<args->dst.annots->n; i++)
     {
-        if ( args->dst.annots_idx[i]==ANN_NBP ) 
+        if ( args->dst.annots_idx[i]==ANN_NBP )
         {
             kputc('\t',&args->tmp_kstr);
             kputw(len,&args->tmp_kstr);
         }
-        else if ( args->dst.annots_idx[i]==ANN_FRAC ) 
+        else if ( args->dst.annots_idx[i]==ANN_FRAC )
         {
             kputc('\t',&args->tmp_kstr);
             kputd((double)len/(args->nbp->end - args->nbp->beg + 1),&args->tmp_kstr);
         }
-        else if ( args->dst.annots_idx[i]==ANN_CNT ) 
+        else if ( args->dst.annots_idx[i]==ANN_CNT )
         {
             kputc('\t',&args->tmp_kstr);
             kputw(args->nbp->n/2,&args->tmp_kstr);
@@ -597,9 +597,12 @@ void process_line(args_t *args, char *line, size_t size)
 
     if ( !regidx_overlap(args->idx, chr_beg,beg,end, args->itr) )
     {
-        write_string(args, line, size);
-        write_annots(args);
-        write_string(args, "\n", 1);
+        if ( args->mode & PRINT_NONMATCHING )
+        {
+            write_string(args, line, size);
+            write_annots(args);
+            write_string(args, "\n", 1);
+        }
         cols_destroy(dst_cols);
         return;
     }
@@ -611,7 +614,7 @@ void process_line(args_t *args, char *line, size_t size)
         kh_clear(str2int, args->tmp_hash[i]);
     }
 
-    int has_overlap = 0;
+    int has_match = 0, annot_len = 0;
     while ( regitr_overlap(args->itr) )
     {
         if ( args->overlap )
@@ -633,13 +636,14 @@ void process_line(args_t *args, char *line, size_t size)
         {
             for (i=0; i<args->dst.match->n; i++)
             {
-                if ( args->dst.match_idx[i] > dst_cols->n ) error("Expected at least %d columns, found %d: %s\n",args->dst.match_idx[i],dst_cols->n,line); 
+                if ( args->dst.match_idx[i] > dst_cols->n ) error("Expected at least %d columns, found %d: %s\n",args->dst.match_idx[i],dst_cols->n,line);
                 char *dst = dst_cols->off[ args->dst.match_idx[i] ];
                 char *src = src_cols->off[ args->src.match_idx[i] ];
                 if ( strcmp(dst,src) ) break;
             }
             if ( i != args->dst.match->n ) continue;
         }
+        has_match = 1;
 
         if ( args->nbp )
             nbp_add(args->nbp, args->itr->beg >= beg ? args->itr->beg : beg, args->itr->end <= end ? args->itr->end : end);
@@ -663,23 +667,31 @@ void process_line(args_t *args, char *line, size_t size)
                 if ( ++args->src.nannots_added[i] >= args->max_annots ) max_annots_reached = 1;
             }
             cols_append(&args->tmp_cols[i], str);
-            has_overlap += strlen(str);
+            annot_len += strlen(str);
         }
         if ( max_annots_reached ) break;
     }
 
-    if ( !has_overlap )
+    if ( !has_match )
     {
-        write_string(args, line, size);
-        write_annots(args);
-        write_string(args, "\n", 1);
+        if ( args->mode & PRINT_NONMATCHING )
+        {
+            write_string(args, line, size);
+            write_annots(args);
+            write_string(args, "\n", 1);
+        }
+        cols_destroy(dst_cols);
+        return;
+    }
+    if ( !(args->mode & PRINT_MATCHING) )
+    {
         cols_destroy(dst_cols);
         return;
     }
 
     size_t len;
     args->tmp_kstr.l = 0;
-    ks_resize(&args->tmp_kstr, has_overlap*3 + args->src.transfer->n*2);
+    ks_resize(&args->tmp_kstr, annot_len*3 + args->src.transfer->n*2);
     for (i=0; i<args->src.transfer->n; i++)
     {
         char *off = dst_cols->off[ args->dst.transfer_idx[i] ] = args->tmp_kstr.s + args->tmp_kstr.l;
@@ -709,11 +721,13 @@ void process_line(args_t *args, char *line, size_t size)
 
 static const char *usage_text(void)
 {
-    return 
+    return
         "\n"
         "About: Annotate regions in DST file with texts from overlapping regions in SRC file.\n"
         "       The transfer of annotations can be conditioned on matching values in one or more\n"
         "       columns (-m), multiple columns can be transferred (-t).\n"
+        "       In addition to column transfer and adding special annotations, the program can simply\n"
+        "       print (when neither -t nor -a is given) or drop (-x) matching lines.\n"
         "       All indexes and coordinates are 1-based and inclusive.\n"
         "Usage: annot-regs [OPTIONS] DST\n"
         "Options:\n"
@@ -732,8 +746,10 @@ static const char *usage_text(void)
         "   -s, --src-file file             Source file\n"
         "   -t, --transfer src:dst          Columns to transfer. If src column does not exist, interpret\n"
         "                                   as the default value to use. If the dst column does not exist,\n"
-        "                                   a new column is created.\n"
+        "                                   a new column is created. If the dst column exists, its values are\n"
+        "                                   overwritten when overlap is found and left as is otherwise.\n"
         "       --version                   Print version string and exit\n"
+        "   -x, --drop-overlaps             Drop overlapping regions (precludes -t)\n"
         "Examples:\n"
         "   # Header is present, match and transfer by column name\n"
         "   annot-regs -s src.txt.gz -d dst.txt.gz -c chr,beg,end:chr,beg,end -m type,sample:type,smpl -t tp/fp:tp/fp\n"
@@ -747,6 +763,9 @@ static const char *usage_text(void)
         "   # One of source or destination files can be streamed to stdin\n"
         "   gunzip -c src.txt.gz | annot-regs -d dst.txt.gz -c chr,beg,end -m type,sample -t tp/fp\n"
         "   gunzip -c dst.txt.gz | annot-regs -s src.txt.gz -c chr,beg,end -m type,sample -t tp/fp\n"
+        "\n"
+        "   # Print matching regions as above but without modifying the records\n"
+        "   gunzip -c src.txt.gz | annot-regs -d dst.txt.gz -c chr,beg,end -m type,sample\n"
         "\n";
 }
 
@@ -767,18 +786,19 @@ int main(int argc, char **argv)
         {"reciprocal",no_argument,NULL,'r'},
         {"src-file",required_argument,NULL,'s'},
         {"transfer",required_argument,NULL,'t'},
+        {"drop-overlaps",no_argument,NULL,'x'},
         {NULL,0,NULL,0}
     };
     char *tmp = NULL;
     int c;
-    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:H",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "hc:d:m:o:s:t:T:ra:Hx",loptions,NULL)) >= 0)
     {
-        switch (c) 
+        switch (c)
         {
             case  0 : args->allow_dups = 1; break;
             case  1 : printf("%s\n",UTILS_VERSION); return 0; break;
-            case  2 : 
-                args->max_annots = strtod(optarg, &tmp); 
+            case  2 :
+                args->max_annots = strtod(optarg, &tmp);
                 if ( tmp==optarg || *tmp ) error("Could not parse --max-annots  %s\n", optarg);
                 break;
             case 'H': args->ignore_headers = 1; break;
@@ -787,12 +807,13 @@ int main(int argc, char **argv)
             case 'd': args->dst.fname = optarg; break;
             case 'm': args->match_str = optarg; break;
             case 'a': args->annots_str = optarg; break;
-            case 'o': 
-                args->overlap = strtod(optarg, &tmp); 
+            case 'o':
+                args->overlap = strtod(optarg, &tmp);
                 if ( tmp==optarg || *tmp ) error("Could not parse --overlap %s\n", optarg);
                 break;
             case 's': args->src.fname = optarg; break;
             case 't': args->transfer_str = optarg; break;
+            case 'x': args->mode = PRINT_NONMATCHING; break;
             case 'h':
             case '?':
             default: error("%sVersion: %s\n\n", usage_text(), UTILS_VERSION); break;
@@ -807,6 +828,12 @@ int main(int argc, char **argv)
         if ( !args->dst.fname ) args->dst.fname = "-";
         if ( !args->src.fname ) args->src.fname = "-";
     }
+    if ( !args->mode )
+    {
+        if ( !args->transfer_str && !args->annots_str ) args->mode = PRINT_MATCHING;
+        else args->mode = PRINT_MATCHING|PRINT_NONMATCHING;
+    }
+    if ( (args->transfer_str || args->annots_str) && !(args->mode & PRINT_MATCHING) ) error("The option -x cannot be combined with -t and -a\n");
 
     init_data(args);
     write_header(&args->dst);
