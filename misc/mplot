@@ -1,0 +1,657 @@
+#!/usr/bin/env perl
+#
+# Author: petr.danecek@gmail
+#
+
+use strict;
+use warnings;
+use Carp;
+use FindBin;
+
+my $mplot = mplot->new();
+$mplot->run();
+
+exit;
+
+#--------------------------------
+
+package mplot;
+use strict;
+use warnings;
+use Carp;
+use File::Temp qw/ :mktemp /;
+
+our @remove = ();
+
+sub mplot::new
+{
+    my ($class,@args) = @_;
+    my $self = @args ? {@args} : {};
+    bless $self, ref($class) || $class;
+
+    my @cmds = ();
+    if ( opendir(my $dh,"$FindBin::RealBin/matplotlib") )
+    {
+        @cmds = sort grep { /\.py$/ && s/.py$// } readdir($dh);
+        closedir($dh);
+    }
+
+    $$self{usage} =
+        "About: convenience frontend to matplotlib\n" .
+        "Usage: mplot [OPTIONS] <cmd> [+KEYS] <file1> ..\n" .
+        "Options:\n" .
+        "   -c, --clean                     Remove temporary files after plot is generated\n" .
+        "   -d, --delim <type>              tab, tab+, space, space+ [space+]\n" .
+        "   -e, --exec <path>               Use this python executable [python]\n" .
+        "   -F, --force-overwrite           Overwrite files without asking\n" .
+        "   -f, --fields <list>             Extract these columns (1-based indexes)\n" .
+        "   -l, --list <file>               file with a list of command line arguments, one per line\n" .
+        "   -o, --output <file>             file.[png|pdf|svg|svgz]\n" .
+        "   -s, --sample <int>              With too big data files, sample randomly <int> values\n" .
+        "   -h, -?, --help                  This help message\n" .
+        "\n" .
+        ( @cmds ? "Commands:\n   ".join("\n   ",@cmds)."\n\n" : '' ) .
+        "Examples:\n" .
+        "   cat dat.txt | mplot xy -o test.png -f 1,2 - -f 1,3 - +dpi 150\n" .
+        "   mplot barplot -o test.png test.dat +xl 'X-axis label' +yl 'Y-axis label'\n" .
+        "   mplot y -F -c -o test.png,svgz -f 1 dat1.txt -f 1=ROH,5 dat2.txt\n" .
+        "\n";
+
+    $self->parse_params();
+
+    return $self;
+}
+
+sub mplot::parse_params
+{
+    my ($self) = @_;
+    $$self{delim} = '';
+    $$self{cmdline} = q[']. join(q[' '],@ARGV) .q['];
+    while (defined(my $arg=shift(@ARGV)))
+    {
+        if ( $arg=~/^\+/ )
+        {
+            my $key=$';
+            if ( exists($$self{keys}{$key}) )
+            {
+                if ( ref($$self{keys}{$key}) ne 'ARRAY' )
+                {
+                    $$self{keys}{$key} = [ $$self{keys}{$key} ];
+                }
+                push @{$$self{keys}{$key}}, shift(@ARGV);
+                next;
+            }
+            $$self{keys}{$key} = shift(@ARGV);
+            next;
+        }
+        if ( $arg eq '-h' or $arg eq '-?' or $arg eq '--help' )
+        {
+            if ( !exists($$self{cmd}) ) { $self->throw(); next; }
+            $self->print_template($$self{cmd});
+            exit(1);
+        }
+        if ( $arg eq '-l' or $arg eq '--list' )
+        {
+            my $list = shift(@ARGV);
+            open(my $fh,'<',$list) or error("$list: $!");
+            while (my $line=<$fh>)
+            {
+                $line =~ s/^\s*//;
+                $line =~ s/\s*$//;
+                push @ARGV,$line;
+            }
+            close($fh);
+            next;
+        }
+        if ( $arg eq '-e' or $arg eq '--exec' ) { $$self{exec} = shift(@ARGV); next; }
+        if ( $arg eq '-d' or $arg eq '--delim' ) { $$self{delim} = shift(@ARGV); next; }
+        if ( $arg eq '-f' or $arg eq '--fields' ) { push @{$$self{fields}},shift(@ARGV); next; }
+        if ( $arg eq '-F' or $arg eq '--force-overwrite' ) { $$self{force_overwrite}=1; next; }
+        if ( $arg eq '-c' or $arg eq '--clean' ) { $$self{clean}=1; next; }
+        if ( $arg eq '-s' or $arg eq '--sample' ) { $$self{sample}=shift(@ARGV); next; }
+        if ( $arg eq '-o' or $arg eq '--output' ) { $$self{outfile}=shift(@ARGV); next; }
+        if ( -e $arg or $arg eq '-' ) { push @{$$self{fnames}},$arg; next; }
+        if ( !exists($$self{cmd}) ) { $$self{cmd} = $arg; next; }
+        $self->throw("Parameter not recognised [$arg]. Run -h for help.\n");
+    }
+    if ( !exists($$self{cmd}) ) { $self->throw(); }
+    if ( !exists($$self{fnames}) && -t ) { $self->throw("No files given.\n"); }
+    if ( !exists($$self{outfile}) ) { $self->throw("Missing the -o option.\n"); }
+    if ( !($$self{outfile}=~/\.([^.]+)$/) ) { $self->throw("Could not parse \"$$self{outfile}\".\n"); }
+    my $prefix = $$self{prefix} = $`;
+    if ( !defined $$self{prefix} or $$self{prefix} eq '' ) { $self->throw("Could not determine output file prefix.\n"); }
+    $$self{format} = [ split(/,/,$1) ];
+    my $idx = 0;
+    while ( -e $prefix && !$$self{force_overwrite} )
+    {
+        if ( $idx==0 )
+        {
+            print STDERR "The directory exists: $prefix\n";
+            print STDERR "Overwrite? [y]/n\n";
+            open(my $tty,'<','/dev/tty') or $self->throw("/dev/tty: $!");
+            my $ret = <$tty>;
+            close($tty);
+            if ( !($ret =~ /^n/i) ) { last; }
+        }
+        $prefix = "$$self{prefix}.$idx";
+        $idx++;
+    }
+    $$self{prefix} = $prefix;
+    $$self{template} = $self->template_location($$self{cmd});
+}
+
+sub mplot::run
+{
+    my ($self) = @_;
+
+    $self->cmd("mkdir -p $$self{prefix}");
+
+    if ( !exists($$self{fnames}) ) { $self->save_stdin(); }
+
+    $self->set_labels(@{$$self{fnames}});
+    for my $file (@{$$self{fname_ids}}) { $self->process_data($$self{files}{$file}); }
+
+    my $mpfile = $self->init_plot();
+    my $cmd = exists($$self{exec}) ? "$$self{exec} $mpfile" : "chmod +x $mpfile && $mpfile";
+    $self->cmd($cmd);
+
+    if ( $$self{clean} ) { $self->cmd("rm -rf $$self{prefix}"); }
+}
+
+sub mplot::process_data
+{
+    my ($self,$file) = @_;
+    if ( $$self{cmd} eq 'cdist' ) { $self->process_cdist($file); return; }
+    if ( $$self{cmd} eq 'dist2' ) { $self->process_cdist($file); $self->process_dist($file); return; }
+    #if ( $$self{cmd} eq 'imshow' ) { $self->process_imshow($file); return; }
+    $self->process_xy($file);
+}
+sub mplot::strip_fields
+{
+    my ($self,$file,$vals) = @_;
+    if ( !exists($$file{fields}) ) { return 0; }
+    my @out = ();
+    for my $idx (@{$$file{fields}})
+    {
+        if ( $idx=~/=/ )
+        {
+            my ($i,$pat) = split(/=/,$idx);
+            if ( $$vals[$i-1] ne $pat ) { return -1; }
+            next;
+        }
+        if ( $idx > scalar @$vals ) { $self->throw("Could not parse $idx-th column in $$file{path}\n"); }
+        push @out,$$vals[$idx-1];
+    }
+    @$vals = @out;
+    return 0;
+}
+sub mplot::process_xy
+{
+    my ($self,$file) = @_;
+
+    my $outfile = "$$self{prefix}/$$file{alias}.dat";
+    push @{$$file{dat}}, $outfile;
+
+    my $in;
+    if ( $$file{path} =~ /\.gz$/ )
+    {
+        open($in,"gunzip -c '$$file{path}' |") or $self->throw("gunzip -c $$file{path}: $!");
+    }
+    else
+    {
+        open($in,'<',$$file{path}) or $self->throw("$$file{path}: $!");
+    }
+
+    my $delim = qr/\s+/;
+    if ( $$self{delim} eq 'tab' ) { $delim = qr/\t/; }
+
+    open(my $out,'>',$outfile) or $self->throw("$outfile: $!");
+    while (my $line=<$in>)
+    {
+        if ( $line=~/^#/ ) { next; }
+        if ( $line=~/^\s*$/ ) { next; }
+        $line =~ s/^\s*//;
+        $line =~ s/\s*$//;
+        my @vals = split($delim,$line);
+        if ( $self->strip_fields($file,\@vals)<0 ) { next; }
+        chomp($vals[-1]);
+        print $out join("\t",@vals), "\n";
+    }
+    close($out) or $self->throw("$outfile: $!");
+    close($in) or $self->throw("$$file{path}: $!");
+}
+sub mplot::process_imshow
+{
+    my ($self,$file) = @_;
+    if ( !$$self{keys}{trim} ) { return; }
+    my @dat;
+    my @nonempty;   # non-empty columns
+    open(my $fh,'<',$$file{path}) or $self->throw("$$file{path}: $!");
+    while (my $line=<$fh>)
+    {
+        if ( $line=~/^#/ ) { next; }
+        my @items = split(/\t/,$line);
+        chomp($items[-1]);
+        push @dat, \@items;
+        for (my $i=0; $i<@items; $i++)
+        {
+            if ( $items[$i] ) { $nonempty[$i] = 1; }
+        }
+    }
+    close($fh) or $self->throw("close $$file{path}");
+
+    my $cs = 0;
+    my $ce = @{$dat[0]} - 1;
+    for (; $cs<@{$dat[0]}; $cs++) { if( $nonempty[$cs] ) { last; } }
+    for (; $ce>0; $ce--) { if ( $nonempty[$ce] ) { last; } }
+
+    my $rs = 0;
+    my $re = @dat - 1;
+    for (; $rs<@dat; $rs++)
+    {
+        my $j;
+        for ($j=0; $j<@{$dat[$rs]}; $j++) { if ($dat[$rs][$j]) { last; } }
+        if ( $j<@{$dat[$rs]} ) { last; }
+    }
+    for (; $re>0; $re--)
+    {
+        my $j;
+        for ($j=0; $j<@{$dat[$re]}; $j++) { if ($dat[$re][$j]) { last; } }
+        if ( $j<@{$dat[$re]} ) { last; }
+    }
+
+    my $outfile = "$$self{prefix}/trimmed.dat";
+    open($fh,'>',$outfile) or $self->throw("$outfile: $!");
+    for (my $r=$rs; $r<=$re; $r++)
+    {
+        for (my $c=$cs; $c<=$ce; $c++)
+        {
+            if ( $c>$cs ) { print $fh "\t"; }
+            print $fh $dat[$r][$c];
+        }
+        print $fh "\n";
+    }
+    close($fh) or $self->throw("close $outfile");
+    push @{$$self{files}{$file}{dat}}, $outfile;
+}
+sub mplot::process_cdist
+{
+    my ($self,$file) = @_;
+    my @dat;
+    open(my $fh,'<',$$file{path}) or $self->throw("$$file{path}: $!");
+    while (my $line=<$fh>)
+    {
+        if ( $line=~/^#/ ) { next; }
+        chomp($line);
+        if ( $$self{sample} && @dat>=$$self{sample} )
+        {
+            my $i = int(rand($$self{sample}));
+            $dat[$i] = $line;
+        }
+        else
+        {
+            push @dat, $line;
+        }
+    }
+    close($fh) or $self->throw("close $$file{path}");
+
+    my @svals = sort { $a<=>$b } @dat;
+    my $prev;
+    my $nvals = scalar @svals;
+    my $dn    = $nvals / 100;
+    my $n     = 0;
+    my $nxt   = $dn;
+    my $outfile = "$$self{prefix}/$$$file{alias}.cdist.dat";
+    push @{$$file{dat}}, $outfile;
+
+    open($fh,'>',$outfile) or $self->throw("$outfile: $!");
+    print $fh "# ", scalar @svals, "\n";
+
+    for (my $i=0; $i<@svals; $i++)
+    {
+        my $val = $svals[$i];
+        $n++;
+        if ( $i+1==@svals or ($n >= $nxt && $val>$prev ) )
+        {
+            printf $fh "%e\t%f\n", $prev, $n/$nvals;
+            $nxt = $n + $dn;
+        }
+        $prev = $val;
+    }
+    close($fh) or $self->throw("$outfile: $!");
+}
+sub mplot::process_dist
+{
+    my ($self,$file) = @_;
+    my @dat;
+    open(my $fh,'<',$$file{path}) or $self->throw("$$file{path}: $!");
+    while (my $line=<$fh>)
+    {
+        if ( $line=~/^#/ ) { next; }
+        chomp($line);
+        if ( $$self{sample} && @dat>=$$self{sample} )
+        {
+            my $i = int(rand($$self{sample}));
+            $dat[$i] = $line;
+        }
+        else
+        {
+            push @dat, $line;
+        }
+    }
+    close($fh) or $self->throw("close $$file{path}");
+
+    my @svals = sort { $a<=>$b } @dat;
+    my @dx;
+    for (my $i=0; $i<50; $i++)
+    {
+        my $y;
+        if ( exists($$self{keys}{xs}) && $$self{keys}{xs} eq 'log' )
+        {
+            my $ymin = log($svals[0]);
+            my $ymax = log($svals[-1]);
+            $y = exp($i*($ymax-$ymin)/50 + $ymin);
+        }
+        else
+        {
+            my $ymin = $svals[0];
+            my $ymax = $svals[-1];
+            $y = $i*($ymax-$ymin)/50 + $ymin;
+        }
+        push @dx, $y;
+    }
+    my $n     = 0;
+    my $prev  = $svals[0];
+    my $outfile = "$$self{prefix}/$$file{alias}.dist.dat";
+    push @{$$file{dat}}, $outfile;
+
+    open($fh,'>',$outfile) or $self->throw("$outfile: $!");
+    print $fh "# ", scalar @svals, "\n";
+    for (my $i=0; $i<@svals; $i++)
+    {
+        my $val = $svals[$i];
+        $n++;
+        if ( $i+1==@svals or (@dx && $val >= $dx[0] && $val>$prev ) )
+        {
+            printf $fh "%e\t%f\n", $val, $n;
+            $n = 0;
+            shift(@dx);
+        }
+        $prev = $val;
+    }
+    close($fh) or $self->throw("$outfile: $!");
+}
+sub mplot::init_plot
+{
+    my ($self) = @_;
+    my (@labels,@files,@files2);
+    for my $fname (@{$$self{fname_ids}})
+    {
+        my $file = $$self{files}{$fname};
+        push @labels, $$file{label};
+        push @files, exists($$file{dat}) ? $$file{dat}[0] : $$file{path};
+        if ( exists($$file{dat}) && exists($$file{dat}[1]) ) { push @files2, $$file{dat}[1]; }
+    }
+    my $labels = "'" . join("','", @labels) . "'";
+    my $files  = "'" . join("','", @files) . "'";
+    my $files2 = "'" . join("','", @files2) . "'";
+
+    open(my $fh,'<',$$self{template}) or $self->throw("$$self{template}: $!");
+    my @lines = <$fh>;
+    close($fh);
+
+    my $pfname = "$$self{prefix}/plot.py";
+    open($fh,'>',$pfname) or $self->throw("$pfname: $!");
+    for my $line (@lines)
+    {
+        # violin.py:        # +med "c=\'white\',ms=6"
+        # bars-stacks.py:   # +lga 'loc=(0.5,1.1)'
+        #
+        if ( $line=~/^# (\S+):\s*\{(\S+)\}/ && exists($$self{keys}{$1}) )
+        {
+            my $short = $1;
+            my $long  = $2;
+            my @items = ref($$self{keys}{$short}) eq 'ARRAY' ? @{$$self{keys}{$short}} : ($$self{keys}{$short});
+            my @out = ();
+            for my $item (@items)
+            {
+                my @xitems = split(/(?<!\\),/,$item);
+                for my $xitem (@xitems)
+                {
+                    $xitem =~ s/\\//g;
+                    my ($key,$val);
+                    if ( $xitem=~/:/ ) { ($key,$val) = split(/:/,$xitem); }
+                    elsif ( $xitem=~/=/ ) { ($key,$val) = split(/=/,$xitem); }
+                    push @out,"'$key':$val";
+                }
+            }
+            print $fh "$long = {" .join(',',@out). "}\n";
+            next;
+        }
+
+        # expand to an array for each input file
+        #   xy.py: # lt: ['lt']
+        #   xy.py: # line: ['lines']    .. this unnecessarily expands everything, must handle in the scripts
+        if ( $line=~/^# (\S+):\s*\['(\S+)'\]/ && exists($$self{keys}{$1}) )
+        {
+            my $tmp = '';
+            if ( ref($$self{keys}{$1}) ne 'ARRAY' ) { $$self{keys}{$1} = [$$self{keys}{$1}]; }
+            while ( scalar @{$$self{keys}{$1}} != scalar @files )
+            {
+                push @{$$self{keys}{$1}},$$self{keys}{$1}[-1];
+            }
+            $tmp = q['] . join(q[','],@{$$self{keys}{$1}}) . q['];
+            print $fh "$2 = [$tmp]\n";
+            next;
+        }
+
+        # expand to an array for each input file
+        #   imshow.py: # hl: [hl]
+        #   xy.py:     # pa: [{plt_args}]
+        if ( $line=~/^# (\S+):\s*\[(\S+)\]/ && exists($$self{keys}{$1}) )
+        {
+            my $key = $1;   # pa
+            my $var = $2;   # {plt_args}
+            my $is_hash = $var=~/^\{(.+)\}$/ ? 1 : 0;
+            my $tmp = '';
+            if ( ref($$self{keys}{$key}) ne 'ARRAY' ) { $$self{keys}{$key} = [$$self{keys}{$key}]; }
+            while ( scalar @{$$self{keys}{$key}} != scalar @files )
+            {
+                push @{$$self{keys}{$key}},$$self{keys}{$key}[-1];
+            }
+            if ( $is_hash )
+            {
+                $var = $1;
+                for my $item (@{$$self{keys}{$key}})
+                {
+                    my @out = ();
+                    my @xitems = split(/,/,$item);
+                    for my $xitem (@xitems)
+                    {
+                        my ($key,$val);
+                        if ( $xitem=~/:/ ) { ($key,$val) = split(/:/,$xitem); }
+                        elsif ( $xitem=~/=/ ) { ($key,$val) = split(/=/,$xitem); }
+                        push @out,"'$key':$val";
+                    }
+                    $item = '{'.join(',',@out).'}';
+                }
+            }
+            $tmp = join(q[,],@{$$self{keys}{$key}});
+            print $fh "$var = [$tmp]\n";
+            next;
+        }
+
+        # This did not work, the expansion was: +lb 5,10,15,20,25,30,35 -> labels = ['5,10,15,20,25,30,35']
+        #
+        #   # expand to an array for each input value
+        #   #   bartable.py: # lb: ('labels')
+        #   if ( $line=~/^# (\S+):\s*\('(\S+)'\)/ && exists($$self{keys}{$1}) )
+        #   {
+        #       my $tmp = '';
+        #       if ( ref($$self{keys}{$1}) ne 'ARRAY' ) { $$self{keys}{$1} = [$$self{keys}{$1}]; }
+        #       $tmp = q['] . join(q[','],@{$$self{keys}{$1}}) . q['];
+        #       print $fh "$2 = [$tmp]\n";
+        #       next;
+        #   }
+
+        # expand to an array
+        #   bartable.py:
+        #       # lb: ('labels')
+        #       +lb 5,10,15,20,25,30,35 -> labels = ['5','10','15','20','25','30','35']
+        #
+        if ( $line=~/^# (\S+):\s*\('(\S+)'\)/ && exists($$self{keys}{$1}) )
+        {
+            my $tmp = '';
+            if ( ref($$self{keys}{$1}) ne 'ARRAY' )
+            {
+                $$self{keys}{$1} = [ split(/,/,$$self{keys}{$1}) ];
+            }
+            $tmp = q['] . join(q[','],@{$$self{keys}{$1}}) . q['];
+            print $fh "$2 = [$tmp]\n";
+            next;
+        }
+
+        if ( $line=~/^# (\S+):\s*\((\S+)\)/ && exists($$self{keys}{$1}) ) { print $fh "$2 = ($$self{keys}{$1})\n"; next; }
+        if ( $line=~/^# (\S+):\s*'(\S+)'/ && exists($$self{keys}{$1}) ) { print $fh "$2 = '$$self{keys}{$1}'\n"; next; }
+        if ( $line=~/^# (\S+):\s*(\S+)/ && exists($$self{keys}{$1}) ) { print $fh "$2 = $$self{keys}{$1}\n"; next; }
+        if ( $line=~/^# '(\S+)'\s*$/ && exists($$self{keys}{$1}) ) { print $fh "$1 = '$$self{keys}{$1}'\n"; next; }
+        if ( $line=~/^# (\S+)\s*$/ && exists($$self{keys}{$1}) ) { print $fh "$1 = $$self{keys}{$1}\n"; next; }
+        if ( $line=~/^# LABELS\s*$/ ) { print $fh "labels = [$labels]\n"; next; }
+        if ( $line=~/^# FILES\s*$/ ) { print $fh "files = [$files]\n"; next; }
+        if ( $line=~/^# FILES2\s*$/ ) { print $fh "files2 = [$files2]\n"; next; }
+        if ( $line=~/^# CMDLINE\s*$/ ) { print $fh "# $$self{cmdline}\n"; next; }
+        if ( $line=~/^# SAVE\s*$/ )
+        {
+            my $dpi = exists($$self{keys}{dpi}) ? ",dpi=$$self{keys}{dpi}" : '';
+            for my $fmt (@{$$self{format}})
+            {
+                print $fh "plt.savefig('$$self{prefix}.$fmt'$dpi)\n";
+            }
+            next;
+        }
+        print $fh $line;
+    }
+    close($fh);
+    return $pfname;
+}
+sub mplot::label_to_alias
+{
+    my ($self,$label) = @_;
+    $$self{dat_id}++;
+    return sprintf "%02d",$$self{dat_id};
+}
+sub mplot::set_labels
+{
+    my ($self,@fnames) = @_;
+    my %labels = ();
+    my $unique = 1;
+    for (my $i=0; $i<@fnames; $i++)
+    {
+        my $file = $fnames[$i];
+        if ( $file eq '-' )
+        {
+            $self->save_stdin();
+            $fnames[$i] = "$$self{prefix}/STDIN";
+        }
+        my $label = $file;
+        $label =~ s{^.*/}{};
+        $label =~ s/\.[^.]*$//;
+        if ( $label=~/^\s*$/ ) { $label = $file; }
+        while ( exists($$self{files}{$file}) ) { $file = "$fnames[$i].".int(rand(1000)); }
+        push @{$$self{fname_ids}}, $file;
+        $$self{files}{$file}{path}  = $fnames[$i];
+        $$self{files}{$file}{label} = $label;
+        $$self{files}{$file}{alias} = $self->label_to_alias($label);
+        if ( exists($labels{$label}) ) { $unique = 0; }
+        $labels{$label} = 1;
+        if ( exists($$self{fields}) && exists($$self{fields}[$i]) )
+        {
+            my @fields = split(/,/,$$self{fields}[$i]);
+            $$self{files}{$file}{fields} = \@fields;
+        }
+    }
+    if ( !$unique )
+    {
+        for my $file (keys %{$$self{files}})
+        {
+            $$self{files}{$file}{label} .= '.'.$$self{files}{$file}{alias};
+        }
+    }
+    open(my $fh,'>',"$$self{prefix}/README") or $self->throw("$$self{prefix}/README: $!");
+    print $fh "# [1]Unique ID\t[2]Label\t[3]File\t[4]Alias\n";
+    for my $id (@{$$self{fname_ids}})
+    {
+        my $file = $$self{files}{$id};
+        print $fh "$$file{alias}\t$$file{label}\t$$file{path}\n";
+        print "$$file{alias}\t$$file{label}\t$$file{path}\n";
+    }
+    close($fh);
+}
+sub mplot::template_location
+{
+    my ($self,$file) = @_;
+    if ( ! -e $file )
+    {
+        my $path = $FindBin::RealBin;
+        if ( -e "$path/$file" ) { $file = "$path/$file"; }
+        elsif ( -e "$path/$file.py" ) { $file = "$path/$file.py"; }
+        elsif ( -e "$path/matplotlib/$file" ) { $file = "$path/matplotlib/$file"; }
+        elsif ( -e "$path/matplotlib/$file.py" ) { $file = "$path/matplotlib/$file.py"; }
+        else { $self->throw("No such file: ${file}[.py] in $path or $path/matplotlib\n"); }
+    }
+    return $file;
+}
+sub mplot::save_stdin
+{
+    my ($self) = @_;
+    if ( $$self{stdin_saved} ) { return; }
+    $$self{stdin_saved} = 1;
+    open(my $fh,'>',"$$self{prefix}/STDIN") or $self->throw("$$self{prefix}/STDIN: $!");
+    while (my $line=<STDIN>) { print $fh $line; }
+    push @{$$self{fnames}}, "$$self{prefix}/STDIN";
+}
+sub mplot::print_template
+{
+    my ($self,$cmd) = @_;
+    my $tmpl = $self->template_location($cmd);
+    open(my $fh,'<',$tmpl) or $self->throw("$tmpl: $!");
+    while (my $line=<$fh>) { print $line; }
+    close($tmpl);
+}
+sub mplot::clean
+{
+    my ($self) = @_;
+    while (defined(my $rem=shift @remove))
+    {
+        if ( $$self{keep_files} ) { warn("Not removing: $rem\n"); }
+        else { unlink($rem); }
+    }
+}
+sub mplot::throw
+{
+    my ($self,@msg) = @_;
+    $self->clean();
+    if ( scalar @msg ) { confess @msg; }
+    die $$self{usage};
+}
+sub mplot::get_temp_file
+{
+    my ($self) = @_;
+    my $tmp = mktemp('/tmp/mplot-XXXXXX');
+    push @remove, $tmp;
+    return $tmp;
+}
+sub mplot::DESTROY
+{
+    my ($self) = @_;
+    $self->clean();
+}
+sub mplot::cmd
+{
+    my ($self,$cmd) = @_;
+    print STDERR "$cmd\n";
+    system($cmd);
+    if ( $? ) { $self->throw("The command exited with non-zero status $?:\n\t$cmd\n\n"); }
+}
+
+
