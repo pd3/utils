@@ -269,7 +269,7 @@ int parse_tab_with_payload(const char *line, char **chr_beg, char **chr_end, uin
     if ( cols->n <= dat->core_idx[1] ) error("Expected at least %d columns, found %d: %s\n",dat->core_idx[1]+1,cols->n,line);
     char *tmp, *ptr = cols->off[ dat->core_idx[1] ];
     *beg = strtod(ptr, &tmp);
-    if ( tmp==ptr ) error("Expected numeric value, found \"%s\": %s\n",ptr,cols->n,line);
+    if ( tmp==ptr ) error("Expected numeric value, found \"%s\": %s\n",ptr,line);
 
     if ( cols->n <= dat->core_idx[2] ) error("Expected at least %d columns, found %d: %s\n",dat->core_idx[2]+1,cols->n,line);
     ptr = cols->off[ dat->core_idx[2] ];
